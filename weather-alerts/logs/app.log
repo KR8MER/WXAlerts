@@ -1,0 +1,84 @@
+[26-Jan-2025 00:14:50 UTC] Bootstrap completed successfully
+[26-Jan-2025 00:14:50 UTC] Initializing WeatherAlertSystem...
+[26-Jan-2025 00:14:50 UTC] Database connection established successfully
+[26-Jan-2025 00:14:50 UTC] Database setup error: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '4326,
+                properties JSON,
+                created_at TIMESTAMP D...' at line 5
+[26-Jan-2025 00:14:50 UTC] Bootstrap Error: Failed to setup database tables
+[26-Jan-2025 00:14:52 UTC] Bootstrap completed successfully
+[26-Jan-2025 00:14:52 UTC] Initializing WeatherAlertSystem...
+[26-Jan-2025 00:14:52 UTC] Database connection established successfully
+[26-Jan-2025 00:14:52 UTC] Database setup error: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '4326,
+                properties JSON,
+                created_at TIMESTAMP D...' at line 5
+[26-Jan-2025 00:14:52 UTC] Bootstrap Error: Failed to setup database tables
+[26-Jan-2025 00:15:01 UTC] Bootstrap completed successfully
+[26-Jan-2025 00:15:01 UTC] Initializing WeatherAlertSystem...
+[26-Jan-2025 00:15:01 UTC] Database connection established successfully
+[26-Jan-2025 00:15:01 UTC] Database setup error: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '4326,
+                properties JSON,
+                created_at TIMESTAMP D...' at line 5
+[26-Jan-2025 00:15:01 UTC] Bootstrap Error: Failed to setup database tables
+[26-Jan-2025 00:15:03 UTC] Bootstrap completed successfully
+[26-Jan-2025 00:15:03 UTC] Initializing WeatherAlertSystem...
+[26-Jan-2025 00:15:03 UTC] Database connection established successfully
+[26-Jan-2025 00:15:03 UTC] Database setup error: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '4326,
+                properties JSON,
+                created_at TIMESTAMP D...' at line 5
+[26-Jan-2025 00:15:03 UTC] Bootstrap Error: Failed to setup database tables
+[25-Jan-2025 19:16:26 America/New_York] Bootstrap started at 2025-01-26 00:15:19
+[26-Jan-2025 00:16:26 UTC] Database connection established successfully
+[26-Jan-2025 00:16:26 UTC] Database setup error: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '4326,
+                properties JSON,
+                created_at TIMESTAMP D...' at line 5
+[26-Jan-2025 00:16:26 UTC] FATAL ERROR: Database setup failed: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '4326,
+                properties JSON,
+                created_at TIMESTAMP D...' at line 5
+[25-Jan-2025 19:16:42 America/New_York] Bootstrap started at 2025-01-26 00:15:19
+[26-Jan-2025 00:16:42 UTC] Database connection established successfully
+[26-Jan-2025 00:16:42 UTC] Database setup error: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '4326,
+                properties JSON,
+                created_at TIMESTAMP D...' at line 5
+[26-Jan-2025 00:16:42 UTC] FATAL ERROR: Database setup failed: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '4326,
+                properties JSON,
+                created_at TIMESTAMP D...' at line 5
+[25-Jan-2025 19:18:01 America/New_York] Bootstrap started at 2025-01-26 00:15:19
+[26-Jan-2025 00:18:01 UTC] Database connection established successfully
+[26-Jan-2025 00:18:01 UTC] Database setup error: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '4326,
+                properties JSON,
+                created_at TIMESTAMP D...' at line 5
+[26-Jan-2025 00:18:01 UTC] FATAL ERROR: Database setup failed: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '4326,
+                properties JSON,
+                created_at TIMESTAMP D...' at line 5
+[25-Jan-2025 19:18:14 America/New_York] Bootstrap started at 2025-01-26 00:15:19
+[26-Jan-2025 00:18:14 UTC] Database connection established successfully
+[26-Jan-2025 00:18:14 UTC] Database setup error: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '4326,
+                properties JSON,
+                created_at TIMESTAMP D...' at line 5
+[26-Jan-2025 00:18:14 UTC] FATAL ERROR: Database setup failed: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '4326,
+                properties JSON,
+                created_at TIMESTAMP D...' at line 5
+[25-Jan-2025 19:21:01 America/New_York] Bootstrap started at 2025-01-26 00:15:19
+[26-Jan-2025 00:21:01 UTC] Database connection established successfully
+[26-Jan-2025 00:21:01 UTC] Database setup error: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '4326,
+                properties JSON,
+                created_at TIMESTAMP D...' at line 5
+[26-Jan-2025 00:21:01 UTC] FATAL ERROR: Database setup failed: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '4326,
+                properties JSON,
+                created_at TIMESTAMP D...' at line 5
+[25-Jan-2025 19:21:18 America/New_York] Bootstrap started at 2025-01-26 00:15:19
+[26-Jan-2025 00:21:18 UTC] Database connection established successfully
+[26-Jan-2025 00:21:18 UTC] Database setup error: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '4326,
+                properties JSON,
+                created_at TIMESTAMP D...' at line 5
+[26-Jan-2025 00:21:18 UTC] FATAL ERROR: Database setup failed: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '4326,
+                properties JSON,
+                created_at TIMESTAMP D...' at line 5
+[25-Jan-2025 19:24:01 America/New_York] Bootstrap started at 2025-01-26 00:15:19
+[26-Jan-2025 00:24:01 UTC] Database connection established successfully
+[26-Jan-2025 00:24:01 UTC] Database setup error: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '4326,
+                properties JSON,
+                created_at TIMESTAMP D...' at line 5
+[26-Jan-2025 00:24:01 UTC] FATAL ERROR: Database setup failed: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '4326,
+                properties JSON,
+                created_at TIMESTAMP D...' at line 5
