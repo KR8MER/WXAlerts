@@ -48,6 +48,7 @@ function getLastCronRun() {
     
     return ['time' => 'No recent updates', 'status' => 'Unknown'];
 }
+
 function getDiskSpace() {
     $path = __DIR__;
     return [
@@ -88,8 +89,7 @@ try {
 // Set page variables
 $pageTitle = 'System Status';
 $headerIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="currentColor" class="bi bi-speedometer me-2" viewBox="0 0 16 16">
-    <path d="M8 2a.5.5 0 0 1 .5.5V4a.5.5 0 0 1-1 0V2.5A.5.5 0 0 1 8 2M3.732 3.732a.5.5 0 0 1 .707 0l.915.914a.5.5 0 1 1-.708.708l-.914-.915a.5.5 0 0 1 0-.707M2 8a.5.5 0 0 1 .5-.5h1.586a.5.5 0 0 1 0 1H2.5A.5.5 0 0 1 2 8m9.5 0a.5.5 0 0 1 .5-.5h1.5a.5.5 0 0 1 0 1H12a.5.5 0 0 1-.5-.5m.754-4.246a.39.39 0 0 0-.527-.02L7.547 7.31A.91.91 0 1 0 8.85 8.569l3.434-4.297a.39.39 0 0 0-.029-.518z"/>
-    <path fill-rule="evenodd" d="M6.664 15.889A8 8 0 1 1 9.336.11a8 8 0 0 1-2.672 15.78zm-4.665-4.283A11.95 11.95 0 0 1 8 10c2.186 0 4.236.585 6.001 1.606a7 7 0 1 0-12.002 0z"/>
+    <path d="M8 2a.5.5 0 0 1 .5.5V4a.5.5 0 0 1-1 0V2.5A.5.5 0 0 1 8 2M3.732 3.732a.5.5 0 0 1 .707 0l.915.914a.5.5 0 1 1-.708.708l-.914-.915a.5.5 0 0 1 0-.707M2 8a.5.5 0 0 1 .5-.5h1.586a.5.5 0 0 1-1 0V8ZM8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0z"/>
 </svg>';
 
 $additionalStyles = '
@@ -139,7 +139,16 @@ $additionalStyles = '
 
 require_once __DIR__ . '/../includes/header.php';
 ?>
+
 <div class="container">
+    <div class="row">
+        <div class="col-12">
+            <h5>Current System Status</h5>
+            <p>Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): <?= gmdate('Y-m-d H:i:s') ?></p>
+            <p>Current User's Login: <?= htmlspecialchars($_SERVER['PHP_AUTH_USER'] ?? 'Unknown') ?></p>
+        </div>
+    </div>
+
     <!-- System Health Row -->
     <div class="row">
         <div class="col-md-6">
@@ -205,7 +214,8 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
         </div>
     </div>
-<!-- Active Alerts Detail Row -->
+    
+    <!-- Active Alerts Detail Row -->
     <div class="row mt-4">
         <div class="col-12">
             <div class="status-card">
@@ -230,16 +240,16 @@ require_once __DIR__ . '/../includes/header.php';
                                 <?php foreach ($activeAlerts as $alert): ?>
                                 <tr>
                                     <td>
-                                        <?= htmlspecialchars($alert['title']) ?>
-                                        <span class="badge bg-<?= strtolower($alert['severity']) === 'extreme' ? 'danger' : 
-                                            (strtolower($alert['severity']) === 'severe' ? 'warning' : 'info') ?>">
-                                            <?= htmlspecialchars($alert['severity']) ?>
+                                        <?= htmlspecialchars($alert['title'] ?? $alert['event_type'] ?? 'Unknown Alert') ?>
+                                        <span class="badge bg-<?= isset($alert['severity']) ? (strtolower($alert['severity']) === 'extreme' ? 'danger' : 
+                                            (strtolower($alert['severity']) === 'severe' ? 'warning' : 'info')) : 'info' ?>">
+                                            <?= htmlspecialchars($alert['severity'] ?? 'Unknown') ?>
                                         </span>
                                     </td>
-                                    <td><?= htmlspecialchars($alert['coverage']) ?></td>
-                                    <td><?= htmlspecialchars(implode(', ', $alert['districts']['fire'])) ?></td>
-                                    <td><?= htmlspecialchars(implode(', ', $alert['districts']['ems'])) ?></td>
-                                    <td><?= htmlspecialchars(implode(', ', $alert['districts']['electric'])) ?></td>
+                                    <td><?= $alert['polygon_type'] === 'NONE' ? 'County-wide' : htmlspecialchars($alert['polygon_type']) ?></td>
+                                    <td><?= isset($alert['districts']['fire']) ? htmlspecialchars(implode(', ', $alert['districts']['fire'])) : 'N/A' ?></td>
+                                    <td><?= isset($alert['districts']['ems']) ? htmlspecialchars(implode(', ', $alert['districts']['ems'])) : 'N/A' ?></td>
+                                    <td><?= isset($alert['districts']['electric']) ? htmlspecialchars(implode(', ', $alert['districts']['electric'])) : 'N/A' ?></td>
                                 </tr>
                                 <?php endforeach; ?>
                             <?php endif; ?>
@@ -249,7 +259,7 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
         </div>
     </div>
-
+    
     <!-- District Coverage Row -->
     <div class="row mt-4">
         <div class="col-12">
@@ -302,7 +312,8 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
         </div>
     </div>
-<!-- System Logs Row -->
+    
+    <!-- System Logs Row -->
     <div class="row mt-4">
         <div class="col-12">
             <div class="status-card">

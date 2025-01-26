@@ -3,15 +3,15 @@
 
 // Include bootstrap first
 require_once __DIR__ . '/../includes/bootstrap.php';
-require_once APP_PATH . '/includes/WeatherAlertSystem.php';
+require_once __DIR__ . "/../includes/WeatherAlertSystem.php";
 
 $alertSystem = new WeatherAlertSystem();
-$stats = $alertSystem->getAlertStatistics();
+$stats = $alertSystem->getAlertStats();
 
 // Set page-specific variables for header
 $pageTitle = 'Alert Statistics';
 $headerIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="currentColor" class="bi bi-graph-up" viewBox="0 0 16 16">
-    <path fill-rule="evenodd" d="M0 0h1v15h15v1H0V0Zm14.817 3.113a.5.5 0 0 1 .07.704l-4.5 5.5a.5.5 0 0 1-.74.037L7.06 6.767l-3.656 5.027a.5.5 0 0 1-.808-.588l4-5.5a.5.5 0 0 1 .758-.06l2.609 2.61 4.15-5.073a.5.5 0 0 1 .704-.07Z"/>
+    <path fill-rule="evenodd" d="M0 0h1v15h15v1H0V0Zm14.817 3.113a.5.5 0 0 1 .07.704l-4.5 5.5a.5.5 0 0 1-.74.037L7.06 6.767l-3.656 5.027a.5.5 0 0 1-.808-.588l4-5.5a.5.5 0 0 1 .758-.06l2.609 2.61 4.5 5.5a.5.5 0 0 1-.74.037l-5-6.5a.5.5 0 0 1 .07-.704h0ZM8 10.293l3.146 3.147a.5.5 0 0 1-.708.708L8 11.707l-2.732 2.732a.5.5 0 0 1-.708-.708L7.293 10.293 5.146 8.146a.5.5 0 0 1 .708-.708L8 9.586l3.146-3.147a.5.5 0 0 1 .708.708L8 10.293Z"/>
 </svg>';
 
 $additionalCss = '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>';

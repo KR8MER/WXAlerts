@@ -1,5 +1,11 @@
 <?php
-// public/map.php
+/**
+ * Weather Alert System - Map View
+ * Current Date: 2025-01-26 01:55:59 UTC
+ * Modified By: KR8MER
+ * Part: 1 of 4
+ */
+
 error_reporting(E_ALL);
 ini_set("display_errors", 1);
 
@@ -7,71 +13,30 @@ require_once __DIR__ . '/../includes/bootstrap.php';
 require_once __DIR__ . "/../includes/WeatherAlertSystem.php";
 
 $alertSystem = new WeatherAlertSystem();
-
-// Debug: Log alert fetch attempt
-error_log("Attempting to fetch active alerts...");
 $activeAlerts = $alertSystem->getActiveAlerts();
-error_log("Active alerts fetched. Count: " . count($activeAlerts));
 
-// Debug: Log paths
-$boundaryFile = __DIR__ . "/../data/boundaries/putnam_county_boundary.json";
-$townshipFile = __DIR__ . "/../data/boundaries/townships.json";
-$electricFile = __DIR__ . "/../data/boundaries/electric_providers.json";
-$fireFile = __DIR__ . "/../data/boundaries/fire_districts.json";
-$emsFile = __DIR__ . "/../data/boundaries/ems_districts.json";
+// Fetch boundary data from the database
+$townshipData = json_encode($alertSystem->getBoundaryData('township'));
+$villageData = json_encode($alertSystem->getBoundaryData('city'));
+$electricData = json_encode($alertSystem->getBoundaryData('electric'));
+$fireData = json_encode($alertSystem->getBoundaryData('fire'));
+$emsData = json_encode($alertSystem->getBoundaryData('ems'));
+$schoolData = json_encode($alertSystem->getBoundaryData('school'));
+$telephoneData = json_encode($alertSystem->getBoundaryData('telephone'));
 
-error_log("Looking for boundary files...");
-
-$boundaryData = "null";
-$townshipData = "null";
-$electricData = "null";
-$fireData = "null";
-$emsData = "null";
-
-if (file_exists($boundaryFile)) {
-    $boundaryData = file_get_contents($boundaryFile);
-    error_log("County boundary data loaded");
-} else {
-    error_log("County boundary file not found at: " . $boundaryFile);
-}
-
-if (file_exists($townshipFile)) {
-    $townshipData = file_get_contents($townshipFile);
-    error_log("Township data loaded");
-} else {
-    error_log("Township file not found at: " . $townshipFile);
-}
-
-if (file_exists($electricFile)) {
-    $electricData = file_get_contents($electricFile);
-    error_log("Electric provider data loaded");
-} else {
-    error_log("Electric provider file not found at: " . $electricFile);
-}
-
-if (file_exists($fireFile)) {
-    $fireData = file_get_contents($fireFile);
-    error_log("Fire district data loaded");
-} else {
-    error_log("Fire district file not found at: " . $fireFile);
-}
-
-if (file_exists($emsFile)) {
-    $emsData = file_get_contents($emsFile);
-    error_log("EMS district data loaded");
-} else {
-    error_log("EMS district file not found at: " . $emsFile);
-}
+// Debug section to verify GeoJSON data
+echo "<!-- Debug GeoJSON Data -->\n";
+echo "<script>\n";
+echo "console.log('City Data:', " . $villageData . ");\n";
+echo "console.log('Township Data:', " . $townshipData . ");\n";
+echo "</script>\n";
 
 // Convert alerts to GeoJSON
-function alertsToGeoJSON($alerts)
-{
-    error_log("Converting alerts to GeoJSON...");
+function alertsToGeoJSON($alerts) {
     $features = [];
 
     foreach ($alerts as $alert) {
         if ($alert["polygon_type"] !== "NONE" && !empty($alert["polygon"])) {
-            error_log("Processing alert: " . $alert["title"]);
             $coordinates = [];
             $polygonPoints = explode(" ", trim($alert["polygon"]));
 
@@ -91,6 +56,14 @@ function alertsToGeoJSON($alerts)
                     $coordinates[] = $coordinates[0];
                 }
 
+                // Ensure districts are properly initialized
+                $districts = isset($alert["districts"]) ? $alert["districts"] : [];
+                $districts = [
+                    "fire" => isset($districts["fire"]) ? $districts["fire"] : [],
+                    "ems" => isset($districts["ems"]) ? $districts["ems"] : [],
+                    "electric" => isset($districts["electric"]) ? $districts["electric"] : []
+                ];
+
                 $features[] = [
                     "type" => "Feature",
                     "properties" => [
@@ -101,20 +74,17 @@ function alertsToGeoJSON($alerts)
                         "expires" => $alert["expires"],
                         "urgency" => $alert["urgency"],
                         "type" => "specific",
+                        "districts" => $districts
                     ],
                     "geometry" => [
                         "type" => "Polygon",
                         "coordinates" => [$coordinates],
                     ],
                 ];
-                error_log("Alert processed successfully");
             }
         }
     }
 
-    error_log(
-        "GeoJSON conversion complete. Features count: " . count($features),
-    );
     return ["type" => "FeatureCollection", "features" => $features];
 }
 
@@ -122,12 +92,7 @@ $alertData = json_encode(alertsToGeoJSON($activeAlerts));
 
 // Set page variables
 $pageTitle = "Alert Map";
-$headerIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="currentColor" class="bi bi-map me-2" viewBox="0 0 16 16">
-    <path fill-rule="evenodd" d="M15.817.113A.5.5 0 0 1 16 .5v14a.5.5 0 0 1-.402.49l-5 1a.502.502 0 0 1-.196 0L5.5 15.01l-4.902.98A.5.5 0 0 1 0 15.5v-14a.5.5 0 0 1 .402-.49l5-1a.5.5 0 0 1 .196 0L10.5.99l4.902-.98a.5.5 0 0 1 .415.103zM10 1.91l-4-.8v12.98l4 .8V1.91zm1 12.98 4-.8V1.11l-4 .8v12.98zm-6-.8V1.11l-4 .8v12.98l4-.8z"/>
-</svg>';
-
-$additionalCss =
-    '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />';
+$additionalCss = '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />';
 
 $additionalStyles = '
     #map {
@@ -168,6 +133,10 @@ $additionalStyles = '
         background-color: rgba(0,0,0,0.05);
     }
     
+    .legend-item.active {
+        background-color: rgba(0,0,0,0.1);
+    }
+    
     .legend-color {
         width: 20px;
         height: 20px;
@@ -175,14 +144,8 @@ $additionalStyles = '
         border-radius: 4px;
         border: 1px solid rgba(0,0,0,0.2);
     }
-    
-    .boundary-control {
-        margin-top: 1rem;
-        padding-top: 1rem;
-        border-top: 1px solid rgba(0,0,0,0.1);
-    }
-    
-    .active-alerts-list {
+
+    .districts-panel {
         background: white;
         border-radius: 8px;
         padding: 1rem;
@@ -191,24 +154,39 @@ $additionalStyles = '
         max-height: 400px;
         overflow-y: auto;
     }
-    
-    .alert-info {
-        border-left-width: 4px;
-        cursor: pointer;
-        transition: transform 0.2s ease;
+
+    .district-summary {
+        font-size: 0.9rem;
+        padding: 0.5rem;
+        background: #f8f9fa;
+        border-radius: 4px;
     }
-    
-    .alert-info:hover {
-        transform: translateX(5px);
+
+    .all-districts-summary {
+        font-size: 0.85rem;
+        line-height: 1.4;
     }
-    
-    .severity-extreme { border-left-color: #dc3545; }
-    .severity-severe { border-left-color: #ffc107; }
-    .severity-moderate { border-left-color: #17a2b8; }
+
+    .all-districts-summary strong {
+        font-size: 0.9rem;
+    }
+
+    .table td {
+        vertical-align: middle;
+    }
+
+    .badge {
+        font-weight: 500;
+    }
+
+    .table-light {
+        background-color: #f8f9fa;
+    }
 ';
 
 require_once __DIR__ . "/../includes/header.php";
 ?>
+<!-- Part 2 of 4 - map.php continued -->
 
 <div class="container">
     <div class="row">
@@ -218,13 +196,13 @@ require_once __DIR__ . "/../includes/header.php";
         <div class="col-md-3">
             <div class="map-controls">
                 <h5 class="mb-3">Boundaries</h5>
-                <div class="legend-item" onclick="toggleBoundaries('county')">
-                    <div class="legend-color" style="background: rgba(108,117,125,0.1); border: 2px solid #6c757d;"></div>
-                    <span>County Boundary</span>
-                </div>
-                <div class="legend-item" onclick="toggleBoundaries('townships')">
+                <div class="legend-item active" onclick="toggleBoundaries('townships')">
                     <div class="legend-color" style="background: rgba(108,117,125,0.05); border: 2px dashed #6c757d;"></div>
                     <span>Township Boundaries</span>
+                </div>
+                <div class="legend-item active" onclick="toggleBoundaries('villages')">
+                    <div class="legend-color" style="background: rgba(0,0,0,0.1); border: 2px solid #000;"></div>
+                    <span>Cities</span>
                 </div>
                 <div class="legend-item" onclick="toggleBoundaries('electric')">
                     <div class="legend-color" style="background: rgba(255,153,0,0.1); border: 2px solid #ff9900;"></div>
@@ -237,6 +215,14 @@ require_once __DIR__ . "/../includes/header.php";
                 <div class="legend-item" onclick="toggleBoundaries('ems')">
                     <div class="legend-color" style="background: rgba(40,167,69,0.1); border: 2px solid #28a745;"></div>
                     <span>EMS Districts</span>
+                </div>
+                <div class="legend-item" onclick="toggleBoundaries('school')">
+                    <div class="legend-color" style="background: rgba(0,123,255,0.1); border: 2px solid #007bff;"></div>
+                    <span>School Districts</span>
+                </div>
+                <div class="legend-item" onclick="toggleBoundaries('telephone')">
+                    <div class="legend-color" style="background: rgba(111,66,193,0.1); border: 2px solid #6f42c1;"></div>
+                    <span>Telephone Districts</span>
                 </div>
                 <div class="boundary-control">
                     <small class="text-muted d-block mb-2">Boundary Style:</small>
@@ -263,6 +249,13 @@ require_once __DIR__ . "/../includes/header.php";
                     <span>Moderate Alert</span>
                 </div>
             </div>
+
+            <div class="districts-panel">
+                <h5 class="mb-3">Affected Districts</h5>
+                <div id="districtsTable">
+                    <!-- Districts table will be populated by JavaScript -->
+                </div>
+            </div>
             
             <div class="active-alerts-list">
                 <h5 class="mb-3">Active Alerts</h5>
@@ -270,23 +263,12 @@ require_once __DIR__ . "/../includes/header.php";
                     <p class="text-muted">No active alerts at this time.</p>
                 <?php else: ?>
                     <?php foreach ($activeAlerts as $alert): ?>
-                        <div class="alert alert-info severity-<?= strtolower(
-                            $alert["severity"],
-                        ) ?>" 
+                        <div class="alert alert-info severity-<?= strtolower($alert["severity"]) ?>" 
                              onclick="focusAlert('<?= $alert["id"] ?>')">
-                            <strong><?= htmlspecialchars(
-                                $alert["title"],
-                            ) ?></strong><br>
+                            <strong><?= htmlspecialchars($alert["title"]) ?></strong><br>
                             <small class="d-block mt-1">
-                                <strong>Type:</strong> <?= $alert[
-                                    "polygon_type"
-                                ] !== "NONE"
-                                    ? "Specific Area"
-                                    : "County-wide" ?><br>
-                                <strong>Expires:</strong> <?= date(
-                                    "g:i A",
-                                    strtotime($alert["expires"]),
-                                ) ?>
+                                <strong>Type:</strong> <?= $alert["polygon_type"] !== "NONE" ? "Specific Area" : "County-wide" ?><br>
+                                <strong>Expires:</strong> <?= date("g:i A", strtotime($alert["expires"])) ?>
                             </small>
                         </div>
                     <?php endforeach; ?>
@@ -299,11 +281,13 @@ require_once __DIR__ . "/../includes/header.php";
 <!-- Initialize map data -->
 <script>
 window.mapData = {
-    boundaryData: <?= $boundaryData ?>,
     townshipData: <?= $townshipData ?>,
+    villageData: <?= $villageData ?>,
     electricData: <?= $electricData ?>,
     fireData: <?= $fireData ?>,
     emsData: <?= $emsData ?>,
+    schoolData: <?= $schoolData ?>,
+    telephoneData: <?= $telephoneData ?>,
     alertData: <?= $alertData ?>
 };
 </script>
@@ -315,5 +299,4 @@ $additionalScripts = '
 <script src="./js/map.js"></script>
 ';
 require_once __DIR__ . "/../includes/footer.php";
-
 ?>

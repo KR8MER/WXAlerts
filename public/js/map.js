@@ -1,570 +1,485 @@
-// Debug mode
-const DEBUG = true;
+/**
+ * Weather Alert System - Map Functions
+ * Current Date: 2025-01-26 01:57:44 UTC
+ * Modified By: KR8MER
+ * Part: 3 of 4
+ */
 
-// Global variables
-let map, countyLayer, townshipLayer, electricLayer, fireLayer, emsLayer, alertLayers = {};
-let boundaryVisible = true;
-let townshipsVisible = false;
-let electricVisible = false;
-let fireVisible = false;
-let emsVisible = false;
+let map;
+let boundaryLayers = {
+    townships: new L.LayerGroup(),
+    villages: new L.LayerGroup(),
+    electric: new L.LayerGroup(),
+    fire: new L.LayerGroup(),
+    ems: new L.LayerGroup(),
+    school: new L.LayerGroup(),
+    telephone: new L.LayerGroup()
+};
+let alertLayer = new L.LayerGroup();
+let currentBoundaryStyle = 'dashed';
 
-// Initialize map when DOM is loaded
-document.addEventListener("DOMContentLoaded", function() {
-    console.log("DOM loaded, initializing map");
-    initMap();
+document.addEventListener('DOMContentLoaded', function() {
+    initializeMap();
+    loadBoundaries();
+    loadAlerts();
 });
 
-// Initialize map
-function initMap() {
-    try {
-        console.log("Creating map");
-        map = L.map("map").setView([41.0359, -84.1271], 10);
-        
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            attribution: " OpenStreetMap contributors"
-        }).addTo(map);
-        
-        // Add boundaries
-        addBoundaries();
-        // Add alerts
-        addAlerts();
-        
-    } catch (error) {
-        console.error("Error in map initialization:", error);
+function initializeMap() {
+    // Initialize the map centered on Putnam County
+    map = L.map('map').setView([41.0369, -84.1277], 10);
+
+    // Add OpenStreetMap tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Add all layer groups to map
+    Object.values(boundaryLayers).forEach(layer => layer.addTo(map));
+    alertLayer.addTo(map);
+}
+
+function loadBoundaries() {
+    // Load township boundaries
+    if (window.mapData.townshipData) {
+        L.geoJSON(window.mapData.townshipData, {
+            style: () => ({
+                color: '#6c757d',
+                weight: 1,
+                opacity: 0.6,
+                fillOpacity: 0.05,
+                dashArray: '3, 3'
+            }),
+            onEachFeature: (feature, layer) => {
+                if (feature.properties && feature.properties.name) {
+                    layer.bindPopup(feature.properties.name);
+                }
+            }
+        }).addTo(boundaryLayers.townships);
+    }
+
+    // Load village (city) boundaries
+    if (window.mapData.villageData) {
+        L.geoJSON(window.mapData.villageData, {
+            style: () => ({
+                color: '#000000',
+                weight: 2,
+                opacity: 0.8,
+                fillOpacity: 0.1,
+                dashArray: '2, 2'
+            }),
+            onEachFeature: (feature, layer) => {
+                if (feature.properties && feature.properties.name) {
+                    layer.bindPopup(feature.properties.name);
+                }
+            }
+        }).addTo(boundaryLayers.villages);
+    }
+
+    // Load electric districts
+    if (window.mapData.electricData) {
+        L.geoJSON(window.mapData.electricData, {
+            style: () => ({
+                color: '#ff9900',
+                weight: 2,
+                opacity: 0.8,
+                fillOpacity: 0.1
+            }),
+            onEachFeature: (feature, layer) => {
+                if (feature.properties && feature.properties.name) {
+                    layer.bindPopup(feature.properties.name);
+                }
+            }
+        }).addTo(boundaryLayers.electric);
+    }
+
+    // Load fire districts
+    if (window.mapData.fireData) {
+        L.geoJSON(window.mapData.fireData, {
+            style: () => ({
+                color: '#dc3545',
+                weight: 2,
+                opacity: 0.8,
+                fillOpacity: 0.1
+            }),
+            onEachFeature: (feature, layer) => {
+                if (feature.properties && feature.properties.name) {
+                    layer.bindPopup(feature.properties.name);
+                }
+            }
+        }).addTo(boundaryLayers.fire);
+    }
+
+    // Load EMS districts
+    if (window.mapData.emsData) {
+        L.geoJSON(window.mapData.emsData, {
+            style: () => ({
+                color: '#28a745',
+                weight: 2,
+                opacity: 0.8,
+                fillOpacity: 0.1
+            }),
+            onEachFeature: (feature, layer) => {
+                if (feature.properties && feature.properties.name) {
+                    layer.bindPopup(feature.properties.name);
+                }
+            }
+        }).addTo(boundaryLayers.ems);
+    }
+
+    // Load school districts
+    if (window.mapData.schoolData) {
+        L.geoJSON(window.mapData.schoolData, {
+            style: () => ({
+                color: '#007bff',
+                weight: 2,
+                opacity: 0.8,
+                fillOpacity: 0.1
+            }),
+            onEachFeature: (feature, layer) => {
+                if (feature.properties && feature.properties.name) {
+                    layer.bindPopup(feature.properties.name);
+                }
+            }
+        }).addTo(boundaryLayers.school);
+    }
+
+    // Load telephone districts
+    if (window.mapData.telephoneData) {
+        L.geoJSON(window.mapData.telephoneData, {
+            style: () => ({
+                color: '#6f42c1',
+                weight: 2,
+                opacity: 0.8,
+                fillOpacity: 0.1
+            }),
+            onEachFeature: (feature, layer) => {
+                if (feature.properties && feature.properties.name) {
+                    layer.bindPopup(feature.properties.name);
+                }
+            }
+        }).addTo(boundaryLayers.telephone);
+    }
+
+    // Set default visible layers
+    Object.entries(boundaryLayers).forEach(([key, layer]) => {
+        if (!['townships', 'villages'].includes(key)) {
+            map.removeLayer(layer);
+            const element = document.querySelector(`[onclick="toggleBoundaries('${key}')"]`);
+            if (element) element.classList.remove('active');
+        } else {
+            const element = document.querySelector(`[onclick="toggleBoundaries('${key}')"]`);
+            if (element) element.classList.add('active');
+        }
+    });
+}
+/**
+ * Weather Alert System - Map Functions (continued)
+ * Current Date: 2025-01-26 01:58:36 UTC
+ * Modified By: KR8MER
+ * Part: 4 of 4
+ */
+
+function loadAlerts() {
+    if (window.mapData.alertData && window.mapData.alertData.features) {
+        L.geoJSON(window.mapData.alertData, {
+            style: function(feature) {
+                return {
+                    color: getAlertColor(feature.properties.severity),
+                    weight: 2,
+                    opacity: 0.8,
+                    fillOpacity: 0.3
+                };
+            },
+            onEachFeature: function(feature, layer) {
+                layer.bindPopup(createAlertPopup(feature.properties));
+                layer.on('mouseover', function() {
+                    this.setStyle({
+                        fillOpacity: 0.5,
+                        weight: 3
+                    });
+                });
+                layer.on('mouseout', function() {
+                    this.setStyle({
+                        fillOpacity: 0.3,
+                        weight: 2
+                    });
+                });
+            }
+        }).addTo(alertLayer);
+
+        // Update districts table after loading alerts
+        updateDistrictsTable();
     }
 }
 
-// Helper function to find districts that intersect with a point
-function findDistrictsForPoint(lat, lon) {
-    let point = L.latLng(lat, lon);
-    let districts = {
-        fire: null,
-        ems: null,
-        electric: null
+function getAlertColor(severity) {
+    const colors = {
+        'extreme': '#dc3545',
+        'severe': '#ffc107',
+        'moderate': '#17a2b8'
     };
-
-    // Check fire districts
-    if (fireLayer) {
-        fireLayer.eachLayer(function(layer) {
-            if (leafletPip.pointInLayer(point, layer, true).length > 0) {
-                districts.fire = layer.feature.properties.DEPT || 'Unknown';
-            }
-        });
-    }
-
-    // Check EMS districts
-    if (emsLayer) {
-        emsLayer.eachLayer(function(layer) {
-            if (leafletPip.pointInLayer(point, layer, true).length > 0) {
-                districts.ems = layer.feature.properties.DEPT || 'Unknown';
-            }
-        });
-    }
-
-    // Check electric providers
-    if (electricLayer) {
-        electricLayer.eachLayer(function(layer) {
-            if (leafletPip.pointInLayer(point, layer, true).length > 0) {
-                districts.electric = layer.feature.properties.COMPNAME || 'Unknown';
-            }
-        });
-    }
-
-    return districts;
+    return colors[severity.toLowerCase()] || '#6c757d';
 }
-// Helper function to find districts for a polygon
-function findDistrictsForPolygon(coordinates) {
-    let districts = {
+
+function createAlertPopup(properties) {
+    const expiresDate = new Date(properties.expires);
+    let popupContent = `
+        <div class="alert-popup">
+            <h5>${properties.title}</h5>
+            <p><strong>Severity:</strong> ${properties.severity}</p>
+            <p><strong>Urgency:</strong> ${properties.urgency}</p>
+            <p>${properties.description}</p>
+            <p><small>Expires: ${expiresDate.toLocaleString()}</small></p>
+    `;
+
+    // Add affected districts if available
+    if (properties.districts) {
+        const districts = properties.districts;
+        if (Object.keys(districts).length > 0) {
+            popupContent += '<div class="mt-2"><strong>Affected Districts:</strong>';
+            if (districts.fire && districts.fire.length) {
+                popupContent += `<div><span class="text-danger">Fire:</span> ${districts.fire.join(', ')}</div>`;
+            }
+            if (districts.ems && districts.ems.length) {
+                popupContent += `<div><span class="text-success">EMS:</span> ${districts.ems.join(', ')}</div>`;
+            }
+            if (districts.electric && districts.electric.length) {
+                popupContent += `<div><span class="text-warning">Electric:</span> ${districts.electric.join(', ')}</div>`;
+            }
+            popupContent += '</div>';
+        }
+    }
+
+    popupContent += '</div>';
+    return popupContent;
+}
+
+function updateDistrictsTable() {
+    const container = document.getElementById('districtsTable');
+    
+    if (!window.mapData.alertData || !window.mapData.alertData.features || window.mapData.alertData.features.length === 0) {
+        container.innerHTML = '<div class="alert alert-info">No active alerts</div>';
+        return;
+    }
+
+    // Initialize district sets
+    let allDistricts = {
         fire: new Set(),
         ems: new Set(),
         electric: new Set()
     };
 
-    // Process each coordinate pair in the polygon
-    coordinates.forEach(coord => {
-        const pointDistricts = findDistrictsForPoint(coord[0], coord[1]);
-        if (pointDistricts.fire) districts.fire.add(pointDistricts.fire);
-        if (pointDistricts.ems) districts.ems.add(pointDistricts.ems);
-        if (pointDistricts.electric) districts.electric.add(pointDistricts.electric);
+    // Collect districts per alert with proper type checking
+    let alertDistricts = window.mapData.alertData.features.map(feature => {
+        const districts = feature.properties.districts || {};
+        return {
+            id: feature.properties.id,
+            title: feature.properties.title,
+            severity: feature.properties.severity,
+            districts: {
+                fire: Array.isArray(districts.fire) ? districts.fire : [],
+                ems: Array.isArray(districts.ems) ? districts.ems : [],
+                electric: Array.isArray(districts.electric) ? districts.electric : []
+            }
+        };
     });
 
-    // Convert Sets to Arrays
-    return {
-        fire: Array.from(districts.fire),
-        ems: Array.from(districts.ems),
-        electric: Array.from(districts.electric)
-    };
-}
-
-function addBoundaries() {
-    // Add county boundary
-    console.log("Adding county boundary");
-    let boundaryData = window.mapData.boundaryData;
-    
-    if (boundaryData !== null) {
-        try {
-            if (typeof boundaryData === "string") {
-                boundaryData = JSON.parse(boundaryData);
-            }
-            
-            countyLayer = L.geoJSON(boundaryData, {
-                style: {
-                    color: "#6c757d",
-                    weight: 2,
-                    fillColor: "#6c757d",
-                    fillOpacity: 0.1,
-                    dashArray: "5,5"
-                }
-            }).addTo(map);
-            
-            // Fit map to county boundary
-            map.fitBounds(countyLayer.getBounds());
-            console.log("County boundary added successfully");
-        } catch (e) {
-            console.error("Error adding county boundary:", e);
-        }
-    }
-    
-    // Add township boundaries
-    console.log("Adding township boundaries");
-    let townshipData = window.mapData.townshipData;
-    
-    if (townshipData !== null) {
-        try {
-            if (typeof townshipData === "string") {
-                townshipData = JSON.parse(townshipData);
-            }
-            
-            townshipLayer = L.geoJSON(townshipData, {
-                style: {
-                    color: "#6c757d",
-                    weight: 1,
-                    fillColor: "#6c757d",
-                    fillOpacity: 0.05,
-                    dashArray: "3,3"
-                },
-                onEachFeature: function(feature, layer) {
-                    if (feature.properties) {
-                        layer.bindPopup(createTownshipPopup(feature.properties));
-                    }
-
-                    layer.on({
-                        mouseover: function(e) {
-                            layer.setStyle({
-                                fillOpacity: 0.2,
-                                weight: 2
-                            });
-                        },
-                        mouseout: function(e) {
-                            layer.setStyle({
-                                fillOpacity: 0.05,
-                                weight: 1
-                            });
+    // Build unique districts sets with safety checks
+    alertDistricts.forEach(alert => {
+        if (alert.districts) {
+            Object.keys(allDistricts).forEach(type => {
+                if (Array.isArray(alert.districts[type])) {
+                    alert.districts[type].forEach(district => {
+                        if (district) {
+                            allDistricts[type].add(district);
                         }
                     });
                 }
             });
-            console.log("Township boundaries ready");
-        } catch (e) {
-            console.error("Error adding township boundaries:", e);
         }
-    }
-// Add electric provider boundaries
-    console.log("Adding electric provider boundaries");
-    let electricData = window.mapData.electricData;
-    
-    if (electricData !== null) {
-        try {
-            if (typeof electricData === "string") {
-                electricData = JSON.parse(electricData);
-            }
-            
-            electricLayer = L.geoJSON(electricData, {
-                style: {
-                    color: "#ff9900",
-                    weight: 1,
-                    fillColor: "#ff9900",
-                    fillOpacity: 0.1,
-                    dashArray: "3,3"
-                },
-                onEachFeature: function(feature, layer) {
-                    if (feature.properties) {
-                        layer.bindPopup(createProviderPopup(feature.properties));
-                    }
+    });
 
-                    layer.on({
-                        mouseover: function(e) {
-                            layer.setStyle({
-                                fillOpacity: 0.2,
-                                weight: 2
-                            });
-                        },
-                        mouseout: function(e) {
-                            layer.setStyle({
-                                fillOpacity: 0.1,
-                                weight: 1
-                            });
-                        }
-                    });
-                }
-            });
-            console.log("Electric provider boundaries ready");
-        } catch (e) {
-            console.error("Error adding electric provider boundaries:", e);
-        }
-    }
+    let tableHTML = `
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 40%;">Alert</th>
+                        <th style="width: 60%;">Affected Districts</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
 
-    // Add fire district boundaries
-    console.log("Adding fire district boundaries");
-    let fireData = window.mapData.fireData;
-    
-    if (fireData !== null) {
-        try {
-            if (typeof fireData === "string") {
-                fireData = JSON.parse(fireData);
-            }
-            
-            fireLayer = L.geoJSON(fireData, {
-                style: {
-                    color: "#dc3545",
-                    weight: 1,
-                    fillColor: "#dc3545",
-                    fillOpacity: 0.1,
-                    dashArray: "3,3"
-                },
-                onEachFeature: function(feature, layer) {
-                    if (feature.properties) {
-                        layer.bindPopup(createFireDistrictPopup(feature.properties));
-                    }
+    alertDistricts.forEach(alert => {
+        tableHTML += `
+            <tr>
+                <td>
+                    <div class="mb-1">${alert.title}</div>
+                    <span class="badge bg-${getSeverityClass(alert.severity)}">
+                        ${alert.severity}
+                    </span>
+                </td>
+                <td>
+                    ${formatDistrictsList(alert.districts)}
+                </td>
+            </tr>
+        `;
+    });
 
-                    layer.on({
-                        mouseover: function(e) {
-                            layer.setStyle({
-                                fillOpacity: 0.2,
-                                weight: 2
-                            });
-                        },
-                        mouseout: function(e) {
-                            layer.setStyle({
-                                fillOpacity: 0.1,
-                                weight: 1
-                            });
-                        }
-                    });
-                }
-            });
-            console.log("Fire district boundaries ready");
-        } catch (e) {
-            console.error("Error adding fire district boundaries:", e);
-        }
-    }
-
-    // Add EMS district boundaries
-    console.log("Adding EMS district boundaries");
-    let emsData = window.mapData.emsData;
-    
-    if (emsData !== null) {
-        try {
-            if (typeof emsData === "string") {
-                emsData = JSON.parse(emsData);
-            }
-            
-            emsLayer = L.geoJSON(emsData, {
-                style: {
-                    color: "#28a745",
-                    weight: 1,
-                    fillColor: "#28a745",
-                    fillOpacity: 0.1,
-                    dashArray: "3,3"
-                },
-                onEachFeature: function(feature, layer) {
-                    if (feature.properties) {
-                        layer.bindPopup(createEmsDistrictPopup(feature.properties));
-                    }
-
-                    layer.on({
-                        mouseover: function(e) {
-                            layer.setStyle({
-                                fillOpacity: 0.2,
-                                weight: 2
-                            });
-                        },
-                        mouseout: function(e) {
-                            layer.setStyle({
-                                fillOpacity: 0.1,
-                                weight: 1
-                            });
-                        }
-                    });
-                }
-            });
-            console.log("EMS district boundaries ready");
-        } catch (e) {
-            console.error("Error adding EMS district boundaries:", e);
-        }
-    }
-}
-function addAlerts() {
-    console.log("Adding alerts");
-    let alertData = window.mapData.alertData;
-    
-    if (alertData) {
-        try {
-            if (typeof alertData === "string") {
-                alertData = JSON.parse(alertData);
-            }
-            
-            if (alertData.features && alertData.features.length > 0) {
-                alertData.features.forEach(feature => {
-                    if (feature.geometry) {
-                        // Find affected districts before creating popup
-                        let affectedDistricts;
-                        if (feature.geometry.type === 'Polygon') {
-                            affectedDistricts = findDistrictsForPolygon(feature.geometry.coordinates[0]);
-                            // Add districts to properties for popup creation
-                            feature.properties.districts = affectedDistricts;
-                        }
-                        
-                        // Alert has specific geometry
-                        const layer = L.geoJSON(feature, {
-                            style: getAlertStyle(feature.properties)
-                        }).addTo(map);
-                        
-                        layer.bindPopup(createAlertPopup(feature.properties));
-                        
-                        if (feature.properties.id) {
-                            alertLayers[feature.properties.id] = layer;
-                        }
-                    } else if (feature.properties.type === 'county-wide') {
-                        // County-wide alert - use county boundary
-                        if (window.mapData.boundaryData) {
-                            // For county-wide alerts, include all districts
-                            feature.properties.districts = {
-                                fire: ['All Fire Districts'],
-                                ems: ['All EMS Districts'],
-                                electric: ['All Electric Providers']
-                            };
-                            
-                            const layer = L.geoJSON(window.mapData.boundaryData, {
-                                style: {
-                                    ...getAlertStyle(feature.properties),
-                                    fillOpacity: 0.2,
-                                    dashArray: '5,10'
-                                }
-                            }).addTo(map);
-                            
-                            layer.bindPopup(createAlertPopup(feature.properties));
-                            
-                            if (feature.properties.id) {
-                                alertLayers[feature.properties.id] = layer;
-                            }
-                        }
-                    }
-                });
-                console.log("Alert layers added successfully");
-            }
-        } catch (e) {
-            console.error("Error adding alert layers:", e);
-        }
-    }
-}
-
-function getAlertStyle(properties) {
-    const styles = {
-        "Extreme": {
-            color: "#dc3545",
-            weight: 2,
-            fillColor: "#dc3545",
-            fillOpacity: 0.3
-        },
-        "Severe": {
-            color: "#ffc107",
-            weight: 2,
-            fillColor: "#ffc107",
-            fillOpacity: 0.3
-        },
-        "Moderate": {
-            color: "#17a2b8",
-            weight: 2,
-            fillColor: "#17a2b8",
-            fillOpacity: 0.3
-        }
-    };
-    return styles[properties.severity] || styles["Moderate"];
-}
-
-function createAlertPopup(properties) {
-    const districts = properties.districts || {
-        fire: [],
-        ems: [],
-        electric: []
-    };
-
-    return `
-        <div class="alert-popup">
-            <h6>${properties.title}</h6>
-            <p>${properties.description}</p>
-            <div class="alert-details">
-                <small>
-                    <strong>Severity:</strong> ${properties.severity}<br>
-                    <strong>Urgency:</strong> ${properties.urgency}<br>
-                    <strong>Expires:</strong> ${new Date(properties.expires).toLocaleString()}<br>
-                    <strong>Type:</strong> ${properties.type === 'county-wide' ? 'County-Wide Alert' : 'Specific Area Alert'}<br>
-                    <strong>Affected Districts:</strong><br>
-                    Fire: ${districts.fire.join(', ') || 'None'}<br>
-                    EMS: ${districts.ems.join(', ') || 'None'}<br>
-                    Electric: ${districts.electric.join(', ') || 'None'}
-                </small>
+    tableHTML += `
+                </tbody>
+            </table>
+            <div class="mt-3">
+                <h6>All Affected Districts</h6>
+                <div class="district-summary">
+                    ${formatAllDistricts(allDistricts)}
+                </div>
             </div>
         </div>
     `;
-}
-function createTownshipPopup(properties) {
-    return `
-        <div class="township-info">
-            <h6>${properties.TOWNSHIP_N || "Unknown"} Township</h6>
-            <p><strong>Population:</strong> ${properties.POPULATION ? properties.POPULATION.toLocaleString() : 'N/A'}</p>
-            <p><strong>Area:</strong> ${properties.AREA_SQMI ? properties.AREA_SQMI.toFixed(2) : 'N/A'} sq mi</p>
-        </div>
-    `;
+
+    container.innerHTML = tableHTML;
 }
 
-function createProviderPopup(properties) {
-    return `
-        <div class="provider-info">
-            <h6>${properties.COMPNAME || "Unknown Provider"}</h6>
-            <p><strong>Company Type:</strong> ${properties.COMPTYPE || 'N/A'}</p>
-            <p><strong>Company Code:</strong> ${properties.COMPCODE || 'N/A'}</p>
-            <p><strong>Service Area:</strong> ${(properties.area_sqmi || 0).toFixed(2)} sq mi</p>
-        </div>
-    `;
-}
-
-function createFireDistrictPopup(properties) {
-    const areaSqMiles = ((properties.Shape_Area / 43560) / 640).toFixed(2);
+function formatDistrictsList(districts) {
+    let html = '';
     
-    return `
-        <div class="fire-info">
-            <h6>${properties.DEPT || "Unknown Department"}</h6>
-            <p><strong>Station:</strong> ${properties.STATION || 'N/A'}</p>
-            <p><strong>Area:</strong> ${areaSqMiles} sq mi</p>
-        </div>
-    `;
+    if (districts.fire && districts.fire.length > 0) {
+        html += `<div class="mb-1">
+            <strong class="text-danger">Fire:</strong> ${districts.fire.sort().join(', ')}
+        </div>`;
+    }
+    
+    if (districts.ems && districts.ems.length > 0) {
+        html += `<div class="mb-1">
+            <strong class="text-success">EMS:</strong> ${districts.ems.sort().join(', ')}
+        </div>`;
+    }
+    
+    if (districts.electric && districts.electric.length > 0) {
+        html += `<div>
+            <strong class="text-warning">Electric:</strong> ${districts.electric.sort().join(', ')}
+        </div>`;
+    }
+    
+    return html || '<em class="text-muted">No specific districts affected</em>';
 }
 
-function createEmsDistrictPopup(properties) {
-    const areaSqMiles = ((properties.Shape_Area / 43560) / 640).toFixed(2);
+function formatAllDistricts(districts) {
+    let html = '<div class="all-districts-summary">';
     
-    return `
-        <div class="ems-info">
-            <h6>${properties.DEPT || "Unknown Department"}</h6>
-            <p><strong>Station:</strong> ${properties.STATION || 'N/A'}</p>
-            <p><strong>Area:</strong> ${areaSqMiles} sq mi</p>
-        </div>
-    `;
+    if (districts.fire.size > 0) {
+        html += `
+            <div class="mb-2">
+                <strong class="text-danger">All Fire Districts:</strong>
+                <div class="ms-2">${Array.from(districts.fire).sort().join(', ')}</div>
+            </div>
+        `;
+    }
+    
+    if (districts.ems.size > 0) {
+        html += `
+            <div class="mb-2">
+                <strong class="text-success">All EMS Districts:</strong>
+                <div class="ms-2">${Array.from(districts.ems).sort().join(', ')}</div>
+            </div>
+        `;
+    }
+    
+    if (districts.electric.size > 0) {
+        html += `
+            <div class="mb-2">
+                <strong class="text-warning">All Electric Districts:</strong>
+                <div class="ms-2">${Array.from(districts.electric).sort().join(', ')}</div>
+            </div>
+        `;
+    }
+    
+    html += '</div>';
+    return html;
+}
+
+function getSeverityClass(severity) {
+    const classes = {
+        'extreme': 'danger',
+        'severe': 'warning',
+        'moderate': 'info'
+    };
+    return classes[severity.toLowerCase()] || 'secondary';
 }
 
 function toggleBoundaries(type) {
-    switch(type) {
-        case "county":
-            if (countyLayer) {
-                boundaryVisible = !boundaryVisible;
-                if (boundaryVisible) {
-                    countyLayer.addTo(map);
-                    console.log("County boundary shown");
-                } else {
-                    map.removeLayer(countyLayer);
-                    console.log("County boundary hidden");
-                }
-            }
-            break;
-            
-        case "townships":
-            if (townshipLayer) {
-                townshipsVisible = !townshipsVisible;
-                if (townshipsVisible) {
-                    townshipLayer.addTo(map);
-                    console.log("Townships shown");
-                } else {
-                    map.removeLayer(townshipLayer);
-                    console.log("Townships hidden");
-                }
-            }
-            break;
-            
-        case "electric":
-            if (electricLayer) {
-                electricVisible = !electricVisible;
-                if (electricVisible) {
-                    electricLayer.addTo(map);
-                    console.log("Electric providers shown");
-                } else {
-                    map.removeLayer(electricLayer);
-                    console.log("Electric providers hidden");
-                }
-            }
-            break;
-            
-        case "fire":
-            if (fireLayer) {
-                fireVisible = !fireVisible;
-                if (fireVisible) {
-                    fireLayer.addTo(map);
-                    console.log("Fire districts shown");
-                } else {
-                    map.removeLayer(fireLayer);
-                    console.log("Fire districts hidden");
-                }
-            }
-            break;
-            
-        case "ems":
-            if (emsLayer) {
-                emsVisible = !emsVisible;
-                if (emsVisible) {
-                    emsLayer.addTo(map);
-                    console.log("EMS districts shown");
-                } else {
-                    map.removeLayer(emsLayer);
-                    console.log("EMS districts hidden");
-                }
-            }
-            break;
+    const layer = boundaryLayers[type];
+    if (!layer) return;
+
+    const element = document.querySelector(`[onclick="toggleBoundaries('${type}')"]`);
+    
+    if (map.hasLayer(layer)) {
+        map.removeLayer(layer);
+        element?.classList.remove('active');
+    } else {
+        map.addLayer(layer);
+        element?.classList.add('active');
     }
 }
 
 function changeBoundaryStyle(style) {
-    const styles = {
-        solid: null,
-        dashed: "5,5",
-        dotted: "1,5"
-    };
+    if (!['solid', 'dashed', 'dotted'].includes(style)) return;
     
-    const layers = {
-        county: countyLayer,
-        township: townshipLayer,
-        electric: electricLayer,
-        fire: fireLayer,
-        ems: emsLayer
-    };
+    currentBoundaryStyle = style;
     
-    Object.values(layers).forEach(layer => {
-        if (layer) {
-            layer.setStyle({
-                dashArray: styles[style]
-            });
+    // Clear and reload all boundary layers
+    Object.values(boundaryLayers).forEach(layer => {
+        const isVisible = map.hasLayer(layer);
+        layer.clearLayers();
+        if (!isVisible) {
+            map.removeLayer(layer);
         }
     });
     
-    console.log("Boundary style changed to:", style);
+    loadBoundaries();
 }
 
 function focusAlert(alertId) {
-    const layer = alertLayers[alertId];
-    if (layer) {
-        map.fitBounds(layer.getBounds());
-        layer.openPopup();
-        console.log("Focused on alert:", alertId);
+    if (!window.mapData.alertData || !window.mapData.alertData.features) return;
+
+    const alertFeature = window.mapData.alertData.features.find(
+        f => f.properties.id === alertId
+    );
+    
+    if (alertFeature) {
+        const bounds = L.geoJSON(alertFeature).getBounds();
+        map.fitBounds(bounds, { padding: [50, 50] });
+
+        // Highlight the alert temporarily
+        const layer = findAlertLayer(alertId);
+        if (layer) {
+            layer.setStyle({
+                fillOpacity: 0.6,
+                weight: 4
+            });
+            setTimeout(() => {
+                layer.setStyle({
+                    fillOpacity: 0.3,
+                    weight: 2
+                });
+            }, 2000);
+        }
     }
 }
+
+function findAlertLayer(alertId) {
+    let targetLayer = null;
+    alertLayer.eachLayer(layer => {
+        if (layer.feature && layer.feature.properties.id === alertId) {
+            targetLayer = layer;
+        }
+    });
+    return targetLayer;
+}
+
+// Auto refresh the map data every 5 minutes
+setInterval(() => {
+    location.reload();
+}, 300000);

@@ -5,11 +5,9 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
-// Include bootstrap first
+// Fix include paths
 require_once __DIR__ . '/../includes/bootstrap.php';
-
-// Then include WeatherAlertSystem
-require_once INCLUDES_PATH . '/WeatherAlertSystem.php';
+require_once __DIR__ . '/../includes/WeatherAlertSystem.php';
 
 $alertSystem = new WeatherAlertSystem();
 $activeAlerts = $alertSystem->getActiveAlerts();
@@ -22,6 +20,20 @@ function getSeverityClass($severity) {
         'moderate' => 'bg-info text-white',
         default => 'bg-light'
     };
+}
+
+// Helper function to format districts
+function formatDistricts($districts) {
+    $output = '';
+    foreach (['fire', 'ems', 'electric'] as $type) {
+        if (!empty($districts[$type])) {
+            $output .= '<div class="district-group mb-2">';
+            $output .= '<strong class="text-capitalize">' . $type . ':</strong> ';
+            $output .= implode(', ', array_map('htmlspecialchars', $districts[$type]));
+            $output .= '</div>';
+        }
+    }
+    return $output;
 }
 
 // Set page-specific variables for header
@@ -103,10 +115,27 @@ $additionalStyles = '
         border-radius: 20px;
         font-weight: 500;
     }
+
+    .districts-section {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 1rem;
+        margin-top: 1rem;
+        border: 1px solid #dee2e6;
+    }
+
+    .district-group {
+        padding: 0.5rem;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    .district-group:last-child {
+        border-bottom: none;
+    }
 ';
 
-// Include header
-require_once INCLUDES_PATH . '/header.php';
+// Include header with correct path
+require_once __DIR__ . '/../includes/header.php';
 ?>
 
 <div class="container">
@@ -153,7 +182,15 @@ require_once INCLUDES_PATH . '/header.php';
                         </div>
                     </div>
                     <p class="card-text"><?= nl2br(htmlspecialchars($alert['description'])); ?></p>
-                    <div class="text-muted">
+                    
+                    <?php if (!empty($alert['districts'])): ?>
+                        <div class="districts-section">
+                            <h6 class="mb-3">Affected Districts:</h6>
+                            <?= formatDistricts($alert['districts']) ?>
+                        </div>
+                    <?php endif; ?>
+
+                    <div class="text-muted mt-3">
                         <strong>Effective:</strong> <?= date('F j, Y g:i A', strtotime($alert['effective'])); ?><br>
                         <strong>Expires:</strong> <?= date('F j, Y g:i A', strtotime($alert['expires'])); ?>
                     </div>
@@ -168,4 +205,4 @@ require_once INCLUDES_PATH . '/header.php';
     <?php endif; ?>
 </div>
 
-<?php require_once INCLUDES_PATH . '/footer.php'; ?>
+<?php require_once __DIR__ . '/../includes/footer.php'; ?>

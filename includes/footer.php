@@ -106,7 +106,7 @@ $utcTime = $currentTime->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i
                 const weatherData = data.split(' ');
 
                 // Extract weather metrics (based on the known position in the clientraw.txt)
-                const temperatureC = parseFloat(weatherData[1]);  // Temp in Celsius
+                const temperatureC = parseFloat(weatherData[4]);  // Temp in Celsius
                 const temperatureF = (temperatureC * 9/5) + 32;  // Convert Celsius to Fahrenheit
                 const humidity = weatherData[5];  // Humidity
                 const windSpeed = weatherData[2];  // Wind Speed
