@@ -153,7 +153,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <div class="card-header <?= getSeverityClass($alert['severity']) ?>">
                     <div class="d-flex justify-content-between align-items-center">
                         <div class="d-flex align-items-center">
-                            <h5 class="card-title mb-0"><?= htmlspecialchars($alert['title']); ?></h5>
+                            <h5 class="card-title mb-0"><?= htmlspecialchars($alert['title'] ?? 'No Title'); ?></h5>
                         </div>
                         <span class="badge bg-light text-dark">
                             Active Alert
@@ -165,23 +165,23 @@ require_once __DIR__ . '/../includes/header.php';
                         <div class="col-md-4">
                             <strong>Severity:</strong> 
                             <span class="badge <?= getSeverityClass($alert['severity']) ?>">
-                                <?= htmlspecialchars($alert['severity']); ?>
+                                <?= htmlspecialchars($alert['severity'] ?? 'Unknown'); ?>
                             </span>
                         </div>
                         <div class="col-md-4">
                             <strong>Event Type:</strong> 
                             <span class="badge bg-secondary">
-                                <?= htmlspecialchars($alert['event_type']); ?>
+                                <?= htmlspecialchars($alert['event_type'] ?? 'Unknown'); ?>
                             </span>
                         </div>
                         <div class="col-md-4">
                             <strong>Urgency:</strong> 
                             <span class="badge bg-info text-white">
-                                <?= htmlspecialchars($alert['urgency']); ?>
+                                <?= htmlspecialchars($alert['urgency'] ?? 'Unknown'); ?>
                             </span>
                         </div>
                     </div>
-                    <p class="card-text"><?= nl2br(htmlspecialchars($alert['description'])); ?></p>
+                    <p class="card-text"><?= nl2br(htmlspecialchars($alert['description'] ?? 'No description available.')); ?></p>
                     
                     <?php if (!empty($alert['districts'])): ?>
                         <div class="districts-section">
@@ -191,8 +191,8 @@ require_once __DIR__ . '/../includes/header.php';
                     <?php endif; ?>
 
                     <div class="text-muted mt-3">
-                        <strong>Effective:</strong> <?= date('F j, Y g:i A', strtotime($alert['effective'])); ?><br>
-                        <strong>Expires:</strong> <?= date('F j, Y g:i A', strtotime($alert['expires'])); ?>
+                        <strong>Effective:</strong> <?= date('F j, Y g:i A', strtotime($alert['effective'] ?? '1970-01-01 00:00:00')); ?><br>
+                        <strong>Expires:</strong> <?= date('F j, Y g:i A', strtotime($alert['expires'] ?? '1970-01-01 00:00:00')); ?>
                     </div>
                     <?php if ($alert['polygon_type'] !== 'NONE'): ?>
                         <div class="mt-2">
