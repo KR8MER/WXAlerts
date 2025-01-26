@@ -1,8 +1,9 @@
 <?php
 /**
  * Weather Alert System - History Page
- * Last Modified: 2025-01-25
+ * Last Modified: 2025-01-26
  * Modified By: KR8MER
+ * Current Time: 2025-01-26 14:14:18 UTC
  */
 
 require_once __DIR__ . '/../includes/bootstrap.php';
@@ -29,7 +30,10 @@ error_log("Filters applied: " . json_encode($filters));
 $historicalAlerts = $alertSystem->searchAlerts($filters['search'], $filters);
 
 // Process alerts to ensure all required fields
-$processedAlerts = array_map(function($alert) {
+$processedAlerts = array_map(function($alert) use ($alertSystem) {
+    // Get the full alert details using the public method
+    $fullAlert = $alertSystem->getAlert($alert['id']);
+    
     return [
         'id' => $alert['id'],
         'title' => $alert['title'] ?? 'Untitled Alert',
@@ -43,9 +47,17 @@ $processedAlerts = array_map(function($alert) {
         'first_seen' => $alert['created_at'] ?? $alert['effective'] ?? date('Y-m-d H:i:s'),
         'polygon' => $alert['polygon'] ?? null,
         'polygon_type' => $alert['polygon_type'] ?? 'NONE',
-        'category' => determineCategory($alert['event_type'] ?? '')
+        'category' => determineCategory($alert['event_type'] ?? ''),
+        'districts' => $fullAlert['districts'] ?? [
+            'fire' => ['All Fire Districts'],
+            'ems' => ['All EMS Districts'],
+            'electric' => ['All Electric Providers']
+        ]
     ];
 }, $historicalAlerts);
+// Additional debug logging
+error_log("Total processed alerts: " . count($processedAlerts));
+error_log("First alert districts: " . (isset($processedAlerts[0]) ? json_encode($processedAlerts[0]['districts']) : 'No alerts'));
 
 // Helper function to determine category
 function determineCategory($eventType) {
@@ -82,7 +94,10 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         'Status',
         'Description',
         'Effective',
-        'Expires'
+        'Expires',
+        'Fire Districts',
+        'EMS Districts',
+        'Electric Providers'
     ]);
     
     // Write alert data
@@ -95,7 +110,10 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             $alert['status'],
             $alert['description'],
             date('Y-m-d H:i', strtotime($alert['effective'])),
-            date('Y-m-d H:i', strtotime($alert['expires']))
+            date('Y-m-d H:i', strtotime($alert['expires'])),
+            implode(', ', $alert['districts']['fire'] ?? []),
+            implode(', ', $alert['districts']['ems'] ?? []),
+            implode(', ', $alert['districts']['electric'] ?? [])
         ]);
     }
     
@@ -116,7 +134,55 @@ function getSeverityClass($severity) {
 
 // Page-specific variables
 $pageTitle = 'Alert History';
-$additionalStyles = file_get_contents(__DIR__ . '/../assets/css/history.css');
+$additionalStyles = '
+    .alert-details .card {
+        background-color: #f8f9fa;
+        border: 1px solid rgba(0,0,0,.125);
+    }
+    
+    .alert-details .card-header {
+        background-color: rgba(0,0,0,.03);
+        border-bottom: 1px solid rgba(0,0,0,.125);
+        padding: .5rem 1rem;
+    }
+    
+    .alert-details .card-body {
+        padding: .75rem 1rem;
+    }
+    
+    .alert-details ul li {
+        margin-bottom: .25rem;
+    }
+    
+    .alert-details ul li:last-child {
+        margin-bottom: 0;
+    }
+    
+    .district-badge {
+        display: inline-block;
+        padding: .25rem .5rem;
+        font-size: .875rem;
+        font-weight: 500;
+        border-radius: .25rem;
+        margin: .125rem;
+    }
+    
+    .alert-filters {
+        background: #f8f9fa;
+        padding: 1rem;
+        border-radius: .5rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,.05);
+    }
+    
+    .table-responsive {
+        border-radius: .5rem;
+        overflow: hidden;
+    }
+    
+    .modal-content {
+        border-radius: .5rem;
+    }
+' . file_get_contents(__DIR__ . '/../assets/css/history.css');
 
 // Include header
 require_once __DIR__ . '/../includes/header.php';
@@ -237,7 +303,7 @@ require_once __DIR__ . '/../includes/header.php';
     <div class="modal fade" id="alert-<?= $alert['id'] ?>" tabindex="-1">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
-                <div class="modal-header">
+                <div class="modal-header <?= getSeverityClass($alert['severity']) ?>">
                     <h5 class="modal-title"><?= htmlspecialchars($alert['title']) ?></h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
@@ -245,7 +311,7 @@ require_once __DIR__ . '/../includes/header.php';
                     <div class="alert-details">
                         <?= nl2br(htmlspecialchars($alert['description'])) ?>
                         <hr>
-                        <div class="row">
+                        <div class="row mb-4">
                             <div class="col-md-6">
                                 <strong>First Seen:</strong> 
                                 <?= date('F j, Y g:i A', strtotime($alert['first_seen'])) ?>
@@ -255,6 +321,36 @@ require_once __DIR__ . '/../includes/header.php';
                                 <?= date('F j, Y g:i A', strtotime($alert['expires'])) ?>
                             </div>
                         </div>
+                        
+                        <!-- Districts Section -->
+                        <div class="mt-4">
+                            <h6 class="mb-3">Affected Districts:</h6>
+                            <div class="row">
+                                <?php if (!empty($alert['districts'])): ?>
+                                    <?php foreach ($alert['districts'] as $type => $districts): ?>
+                                        <div class="col-md-4 mb-3">
+                                            <div class="card h-100">
+                                                <div class="card-header">
+                                                    <strong><?= ucfirst($type) ?></strong>
+                                                </div>
+                                                <div class="card-body">
+                                                    <ul class="list-unstyled mb-0">
+                                                        <?php foreach ($districts as $district): ?>
+                                                            <li><?= htmlspecialchars($district) ?></li>
+                                                        <?php endforeach; ?>
+                                                    </ul>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
+                                    <div class="col-12">
+                                        <p class="text-muted">No specific district information available.</p>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+
                         <?php if ($alert['polygon_type'] !== 'NONE'): ?>
                             <div class="mt-3">
                                 <a href="map.php?alert=<?= $alert['id'] ?>" 

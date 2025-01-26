@@ -32,63 +32,7 @@ echo "console.log('Township Data:', " . $townshipData . ");\n";
 echo "</script>\n";
 
 // Convert alerts to GeoJSON
-function alertsToGeoJSON($alerts) {
-    $features = [];
-
-    foreach ($alerts as $alert) {
-        if ($alert["polygon_type"] !== "NONE" && !empty($alert["polygon"])) {
-            $coordinates = [];
-            $polygonPoints = explode(" ", trim($alert["polygon"]));
-
-            foreach ($polygonPoints as $point) {
-                $parts = explode(",", trim($point));
-                if (count($parts) === 2) {
-                    $lat = filter_var($parts[0], FILTER_VALIDATE_FLOAT);
-                    $lng = filter_var($parts[1], FILTER_VALIDATE_FLOAT);
-                    if ($lat !== false && $lng !== false) {
-                        $coordinates[] = [$lng, $lat];
-                    }
-                }
-            }
-
-            if (count($coordinates) > 2) {
-                if ($coordinates[0] !== end($coordinates)) {
-                    $coordinates[] = $coordinates[0];
-                }
-
-                // Ensure districts are properly initialized
-                $districts = isset($alert["districts"]) ? $alert["districts"] : [];
-                $districts = [
-                    "fire" => isset($districts["fire"]) ? $districts["fire"] : [],
-                    "ems" => isset($districts["ems"]) ? $districts["ems"] : [],
-                    "electric" => isset($districts["electric"]) ? $districts["electric"] : []
-                ];
-
-                $features[] = [
-                    "type" => "Feature",
-                    "properties" => [
-                        "id" => $alert["id"],
-                        "title" => $alert["title"],
-                        "severity" => $alert["severity"],
-                        "description" => $alert["description"],
-                        "expires" => $alert["expires"],
-                        "urgency" => $alert["urgency"],
-                        "type" => "specific",
-                        "districts" => $districts
-                    ],
-                    "geometry" => [
-                        "type" => "Polygon",
-                        "coordinates" => [$coordinates],
-                    ],
-                ];
-            }
-        }
-    }
-
-    return ["type" => "FeatureCollection", "features" => $features];
-}
-
-$alertData = json_encode(alertsToGeoJSON($activeAlerts));
+$alertData = json_encode($alertSystem->alertsToGeoJSON($activeAlerts));
 
 // Set page variables
 $pageTitle = "Alert Map";

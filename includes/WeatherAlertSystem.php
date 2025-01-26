@@ -420,6 +420,84 @@ public function getAlertStats() {
         return ['type' => 'FeatureCollection', 'features' => []];
     }
 }
+
+public function alertsToGeoJSON($alerts) {
+    $this->logError("Converting alerts to GeoJSON...");
+    $features = [];
+
+    foreach ($alerts as $alert) {
+        try {
+            // Base properties that all alerts should have
+            $baseProperties = [
+                "id" => $alert["id"],
+                "title" => $alert["title"],
+                "severity" => $alert["severity"] ?: "Unknown",
+                "description" => $alert["description"],
+                "expires" => $alert["expires"],
+                "urgency" => $alert["urgency"],
+                "effective" => $alert["effective"],
+                "status" => $alert["status"]
+            ];
+
+            if ($alert["polygon_type"] !== "NONE" && !empty($alert["polygon"])) {
+                // Process specific area alert
+                $coordinates = [];
+                $polygonPoints = explode(" ", trim($alert["polygon"]));
+                
+                foreach ($polygonPoints as $point) {
+                    $parts = explode(",", trim($point));
+                    if (count($parts) === 2) {
+                        $lat = filter_var($parts[0], FILTER_VALIDATE_FLOAT);
+                        $lon = filter_var($parts[1], FILTER_VALIDATE_FLOAT);
+                        if ($lat !== false && $lon !== false) {
+                            $coordinates[] = [$lon, $lat];
+                        }
+                    }
+                }
+
+                if (count($coordinates) > 2) {
+                    // Close the polygon if needed
+                    if ($coordinates[0] !== end($coordinates)) {
+                        $coordinates[] = $coordinates[0];
+                    }
+
+                    $features[] = [
+                        "type" => "Feature",
+                        "properties" => array_merge($baseProperties, [
+                            "type" => "specific",
+                            "districts" => $alert["districts"] ?? []
+                        ]),
+                        "geometry" => [
+                            "type" => "Polygon",
+                            "coordinates" => [$coordinates]
+                        ]
+                    ];
+                }
+            } else {
+                // Process county-wide alert
+                $features[] = [
+                    "type" => "Feature",
+                    "properties" => array_merge($baseProperties, [
+                        "type" => "county-wide",
+                        "districts" => [
+                            'fire' => ['All Fire Districts'],
+                            'ems' => ['All EMS Districts'],
+                            'electric' => ['All Electric Providers']
+                        ]
+                    ])
+                ];
+            }
+        } catch (Exception $e) {
+            $this->logError("Error processing alert to GeoJSON: " . $e->getMessage());
+            continue;
+        }
+    }
+
+    $result = ["type" => "FeatureCollection", "features" => $features];
+    $this->logError("Generated GeoJSON with " . count($features) . " features");
+    return $result;
+}
+
 private function getAffectedDistricts($rawPolygon) {
     error_log("[DEBUG] Starting getAffectedDistricts with polygon: " . substr($rawPolygon, 0, 50) . "...");
     
@@ -429,21 +507,36 @@ private function getAffectedDistricts($rawPolygon) {
         error_log("[DEBUG] Found $count total boundaries in database");
         
         $coordinates = array_map(function($pair) {
-            list($lat, $lon) = explode(',', trim($pair));
+            $parts = explode(',', trim($pair));
+            // Add safety check for array parts
+            if (count($parts) >= 2) {
+                $lat = $parts[0];
+                $lon = $parts[1];
+            } else {
+                error_log("[DEBUG] Invalid coordinate pair: " . $pair);
+                return "0 0"; // Default coordinates if pair is invalid
+            }
             return "$lon $lat";
         }, explode(' ', trim($rawPolygon)));
+        
+        if (empty($coordinates)) {
+            error_log("[DEBUG] No valid coordinates found in polygon");
+            return ['fire' => [], 'ems' => [], 'electric' => []];
+        }
         
         $wkt = "POLYGON((" . implode(',', $coordinates) . "))";
         error_log("[DEBUG] Created WKT polygon: " . substr($wkt, 0, 50) . "...");
         
-        // Test the spatial query components
+        // Modified query to remove duplicates and sort
         $testQuery = "
-            SELECT b.id, b.name, b.type, ST_AsText(b.geometry) as geom
+            SELECT DISTINCT b.id, b.name, b.type, ST_AsText(b.geometry) as geom
             FROM boundaries b
             WHERE ST_Intersects(
                 b.geometry, 
                 ST_GeomFromText(?)
-            )";
+            )
+            GROUP BY b.type, b.name
+            ORDER BY b.type, b.name";
         
         $stmt = $this->db->prepare($testQuery);
         $stmt->execute([$wkt]);
@@ -453,10 +546,21 @@ private function getAffectedDistricts($rawPolygon) {
         
         $affected = ['fire' => [], 'ems' => [], 'electric' => []];
         foreach ($results as $row) {
-            $affected[$row['type']][] = $row['name'];
+            if (isset($row['type']) && isset($row['name']) && isset($affected[$row['type']])) {
+                // Only add if not already present
+                if (!in_array($row['name'], $affected[$row['type']], true)) {
+                    $affected[$row['type']][] = $row['name'];
+                }
+            }
         }
         
-        error_log("[DEBUG] Final affected districts: " . print_r($affected, true));
+        // Sort each district array
+        foreach ($affected as &$districts) {
+            sort($districts, SORT_STRING);
+        }
+        unset($districts); // Break the reference
+        
+        error_log("[DEBUG] Final affected districts (sorted, deduplicated): " . print_r($affected, true));
         return $affected;
         
     } catch (Exception $e) {
@@ -465,103 +569,6 @@ private function getAffectedDistricts($rawPolygon) {
         return ['fire' => [], 'ems' => [], 'electric' => []];
     }
 }
-    private function processAlert($cap, $entry) {
-        $info = $cap->info;
-        $polygon = $this->processPolygon($cap);
-        $alertId = (string)$entry->id;
-        
-        try {
-            $this->logError("Processing alert: " . (string)$info->headline . " (ID: $alertId)");
-            
-            $effectiveDate = $this->convertToMySQLDateTime((string)$info->effective);
-            $expiresDate = $this->convertToMySQLDateTime((string)$info->expires);
-            $endsDate = isset($info->ends) ? $this->convertToMySQLDateTime((string)$info->ends) : $expiresDate;
-            
-            $stmt = $this->db->prepare("
-                SELECT id, effective, ends 
-                FROM alerts 
-                WHERE alert_id = ?
-                ORDER BY updated_at DESC
-                LIMIT 1
-            ");
-            
-            $stmt->execute([$alertId]);
-            $existingAlert = $stmt->fetch();
-            
-            if ($existingAlert) {
-                if ($effectiveDate != $existingAlert['effective'] || 
-                    $endsDate != $existingAlert['ends']) {
-                    
-                    $stmt = $this->db->prepare("
-                        UPDATE alerts SET
-                            title = ?,
-                            description = ?,
-                            polygon = ?,
-                            polygon_type = ?,
-                            severity = ?,
-                            urgency = ?,
-                            certainty = ?,
-                            event_type = ?,
-                            effective = ?,
-                            expires = ?,
-                            ends = ?,
-                            status = ?,
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ?
-                    ");
-                    
-                    $stmt->execute([
-                        (string)$info->headline,
-                        (string)$info->description,
-                        $polygon['coordinates'],
-                        $polygon['type'],
-                        (string)$info->severity,
-                        (string)$info->urgency,
-                        (string)$info->certainty,
-                        (string)$info->event,
-                        $effectiveDate,
-                        $expiresDate,
-                        $endsDate,
-                        (string)$cap->status,
-                        $existingAlert['id']
-                    ]);
-                    
-                    $this->logError("Alert updated successfully");
-                }
-            } else {
-                $stmt = $this->db->prepare("
-                    INSERT INTO alerts 
-                    (alert_id, title, description, polygon, polygon_type, severity, 
-                    urgency, certainty, event_type, effective, expires, ends, status) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ");
-                
-                $stmt->execute([
-                    $alertId,
-                    (string)$info->headline,
-                    (string)$info->description,
-                    $polygon['coordinates'],
-                    $polygon['type'],
-                    (string)$info->severity,
-                    (string)$info->urgency,
-                    (string)$info->certainty,
-                    (string)$info->event,
-                    $effectiveDate,
-                    $expiresDate,
-                    $endsDate,
-                    (string)$cap->status
-                ]);
-                
-                $this->logError("New alert saved successfully");
-            }
-            
-            return true;
-            
-        } catch (PDOException $e) {
-            $this->logError("Error processing alert: " . $e->getMessage());
-            throw $e;
-        }
-    }
 public function getActiveAlerts($district = null) {
     try {
         $currentUTC = gmdate('Y-m-d H:i:s');
@@ -569,37 +576,31 @@ public function getActiveAlerts($district = null) {
         error_log("Current UTC Time: " . $currentUTC);
         
         $query = "SELECT * FROM alerts 
-                  WHERE (status IN ('Active', 'Actual'))
+                  WHERE status = 'Active'
                   AND effective <= ?
                   AND expires > ?
                   ORDER BY created_at DESC";
         
         error_log("Executing query: " . $query);
-        error_log("With current_time: " . $currentUTC);
         
         $stmt = $this->db->prepare($query);
-        $stmt->execute([$currentUTC, $currentUTC]); // Pass parameters as array
+        $stmt->execute([$currentUTC, $currentUTC]);
         
         $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
-        error_log("Found " . count($results) . " active alerts");
-        
-        // Debug each result
-        foreach ($results as $index => $alert) {
-            error_log("Alert " . ($index + 1) . ":");
-            error_log(json_encode([
-                'id' => $alert['id'],
-                'alert_id' => $alert['alert_id'],
-                'event_type' => $alert['event_type'],
-                'status' => $alert['status'],
-                'effective' => $alert['effective'],
-                'expires' => $alert['expires'],
-                'title' => $alert['title'] ?? 'NO TITLE',
-                'severity' => $alert['severity'] ?? 'NO SEVERITY'
-            ], JSON_PRETTY_PRINT));
+        // Process each alert to get district information
+        foreach ($results as &$alert) {
+            if ($alert['polygon_type'] !== 'NONE' && !empty($alert['polygon'])) {
+                $alert['districts'] = $this->getAffectedDistricts($alert['polygon']);
+            } else {
+                $alert['districts'] = [
+                    'fire' => ['All Fire Districts'],
+                    'ems' => ['All EMS Districts'],
+                    'electric' => ['All Electric Providers']
+                ];
+            }
         }
         
-        error_log("========= END DEBUG: getActiveAlerts() =========");
         return $results;
         
     } catch (PDOException $e) {
