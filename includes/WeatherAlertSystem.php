@@ -233,8 +233,15 @@ class WeatherAlertSystem {
 
 private function processAlert($alertXml, $entry) {
     try {
-        // Extract and log relevant information
+        // Extract alert identifier
         $alertId = (string) $alertXml->identifier;
+        
+        // Check if alert already exists and get its current status
+        $stmt = $this->pdo->prepare("SELECT id FROM alerts WHERE alert_id = ?");
+        $stmt->execute([$alertId]);
+        $existingAlert = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        // Extract other alert information
         $event = (string) $alertXml->info->event;
         $severity = (string) $alertXml->info->severity;
         $description = (string) $alertXml->info->description;
@@ -242,22 +249,72 @@ private function processAlert($alertXml, $entry) {
         $effective = $this->convertToMySQLDateTime((string) $alertXml->info->effective);
         $ends = $this->convertToMySQLDateTime((string) $alertXml->info->ends);
         $title = (string) $alertXml->info->headline;
-        $polygon = (string) $alertXml->info->area->polygon;
-        $polygonType = !empty($polygon) ? 'POLYGON' : 'NONE';
-
-        // Log the extracted information
-        $this->logError("Event: $event, Severity: $severity, Expires: $expires, Effective: $effective, Ends: $ends");
-
-        // Example database insertion (you can modify based on your schema)
-        $stmt = $this->db->prepare("
-            INSERT INTO alerts (alert_id, event, severity, description, expires, effective, ends, created_at, title, polygon, polygon_type)
-            VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?)
-        ");
-        $stmt->execute([$alertId, $event, $severity, $description, $expires, $effective, $ends, $title, $polygon, $polygonType]);
-
-        $this->logError("Alert processed and stored in database");
-    } catch (PDOException $e) {
-        $this->logError("Error processing individual alert: " . $e->getMessage());
+        $status = (string) $alertXml->status;
+        
+        if ($existingAlert) {
+            // Update existing alert if needed
+            $stmt = $this->pdo->prepare("
+                UPDATE alerts 
+                SET 
+                    event_type = ?,
+                    severity = ?,
+                    description = ?,
+                    expires = ?,
+                    effective = ?,
+                    ends = ?,
+                    title = ?,
+                    status = ?,
+                    updated_at = NOW()
+                WHERE alert_id = ?
+            ");
+            
+            $stmt->execute([
+                $event,
+                $severity,
+                $description,
+                $expires,
+                $effective,
+                $ends,
+                $title,
+                $status,
+                $alertId
+            ]);
+            
+            $this->logError("Updated existing alert: $alertId");
+        } else {
+            // Insert new alert
+            $stmt = $this->pdo->prepare("
+                INSERT INTO alerts (
+                    alert_id, event_type, severity, description, 
+                    expires, effective, ends, title, status, 
+                    created_at, updated_at
+                ) VALUES (
+                    ?, ?, ?, ?, 
+                    ?, ?, ?, ?, ?, 
+                    NOW(), NOW()
+                )
+            ");
+            
+            $stmt->execute([
+                $alertId,
+                $event,
+                $severity,
+                $description,
+                $expires,
+                $effective,
+                $ends,
+                $title,
+                $status
+            ]);
+            
+            $this->logError("Inserted new alert: $alertId");
+        }
+        
+        return true;
+        
+    } catch (Exception $e) {
+        $this->logError("Error processing alert {$alertId}: " . $e->getMessage());
+        throw $e;
     }
 }
     private function verifyTableSchema() {
@@ -542,9 +599,9 @@ private function processAlert($alertXml, $entry) {
                         "properties" => array_merge($baseProperties, [
                             "type" => "county-wide",
                             "districts" => [
-                                'fire' => ['All Fire Districts'],
-                                'ems' => ['All EMS Districts'],
-                                'electric' => ['All Electric Providers']
+                                'fire' => ['All Fire Stations'],
+                                'ems' => ['All EMS Squads'],
+                                'electric' => ['All Electric Utilities']
                             ]
                         ])
                     ];
@@ -662,9 +719,9 @@ private function processAlert($alertXml, $entry) {
                     $alert['districts'] = $this->getAffectedDistricts($alert['polygon']);
                 } else {
                     $alert['districts'] = [
-                        'fire' => ['All Fire Districts'],
-                        'ems' => ['All EMS Districts'],
-                        'electric' => ['All Electric Providers']
+                        'fire' => ['All Fire Stations'],
+                        'ems' => ['All EMS Squads'],
+                        'electric' => ['All Electric Utilities']
                     ];
                 }
             }
