@@ -63,22 +63,131 @@ error_log("First alert districts: " . (isset($processedAlerts[0]) ? json_encode(
 // Helper function to determine category
 function determineCategory($eventType) {
     $categories = [
-        'SEVERE' => ['Tornado Warning', 'Severe Thunderstorm Warning', 'Flash Flood Warning'],
-        'WINTER' => ['Winter Storm Warning', 'Ice Storm Warning', 'Blizzard Warning', 'Winter Weather Advisory'],
-        'FLOOD' => ['Flood Warning', 'Flood Watch', 'Flood Advisory'],
-        'HEAT' => ['Excessive Heat Warning', 'Heat Advisory'],
-        'WIND' => ['High Wind Warning', 'Wind Advisory']
+        'SEVERE' => [
+            'Tornado Warning',
+            'Severe Thunderstorm Warning',
+            'Flash Flood Warning',
+            'Severe Weather Statement'
+        ],
+        'WINTER' => [
+            'Winter Storm Warning',
+            'Ice Storm Warning',
+            'Blizzard Warning',
+            'Winter Weather Advisory',
+            'Winter Storm Watch',
+            'Freezing Rain Advisory',
+            'Snow Squall Warning',
+            'Lake Effect Snow Warning',
+            'Lake Effect Snow Advisory',
+            'Freeze Warning',
+            'Freeze Watch'
+        ],
+        'FLOOD' => [
+            'Flood Warning',
+            'Flood Watch',
+            'Flood Advisory',
+            'Flash Flood Watch',
+            'Flash Flood Statement',
+            'River Flood Warning',
+            'River Flood Watch',
+            'Coastal Flood Warning',
+            'Coastal Flood Watch',
+            'Coastal Flood Advisory'
+        ],
+        'HEAT' => [
+            'Excessive Heat Warning',
+            'Excessive Heat Watch',
+            'Heat Advisory'
+        ],
+        'WIND' => [
+            'High Wind Warning',
+            'High Wind Watch',
+            'Wind Advisory',
+            'Lake Wind Advisory',
+            'Gale Warning',
+            'Wind Chill Warning',
+            'Wind Chill Watch',
+            'Wind Chill Advisory'
+        ],
+        'FIRE' => [
+            'Red Flag Warning',
+            'Fire Weather Watch',
+            'Fire Warning',
+            'Extreme Fire Danger'
+        ],
+        'MARINE' => [
+            'Small Craft Advisory',
+            'Storm Warning',
+            'Special Marine Warning',
+            'Hurricane Force Wind Warning',
+            'Hurricane Warning',
+            'Tropical Storm Warning',
+            'Tropical Storm Watch',
+            'Hurricane Watch'
+        ],
+        'FOG' => [
+            'Dense Fog Advisory',
+            'Dense Smoke Advisory'
+        ],
+        'SPECIAL' => [
+            'Special Weather Statement',
+            'Short Term Forecast',
+            'Hazardous Weather Outlook',
+            'Local Area Emergency'
+        ],
+        'ADVISORY' => [
+            'Air Quality Alert',
+            'Air Stagnation Advisory',
+            'Ashfall Advisory',
+            'Beach Hazards Statement',
+            'Coastal Advisory'
+        ],
+        'THUNDERSTORM' => [
+            'Severe Thunderstorm Watch',
+            'Tornado Watch',
+            'Thunderstorm Warning'
+        ],
+        'HYDROLOGIC' => [
+            'Hydrologic Advisory',
+            'Hydrologic Outlook',
+            'Lakeshore Flood Advisory',
+            'Lakeshore Flood Warning',
+            'Lakeshore Flood Watch'
+        ],
+        'TEMPERATURE' => [
+            'Hard Freeze Warning',
+            'Hard Freeze Watch',
+            'Frost Advisory',
+            'Heat Advisory',
+            'Excessive Heat Warning'
+        ],
+        'VOLCANO' => [
+            'Volcanic Activity Statement',
+            'Ashfall Warning',
+            'Volcano Warning'
+        ],
+        'EARTHQUAKE' => [
+            'Earthquake Warning',
+            'Tsunami Warning',
+            'Tsunami Watch',
+            'Tsunami Advisory'
+        ],
+        'OTHER' => [] // Catch-all for any undefined event types
     ];
 
-    foreach ($categories as $category => $events) {
+    // Search through all categories for the event type
+    foreach ($categories as $categoryName => $events) {
         if (in_array($eventType, $events)) {
-            return $category;
+            return $categoryName;
         }
     }
+
+    // Log unmatched event types for future updates
+    error_log("Uncategorized weather event type: " . $eventType);
     
+    // Return OTHER if no match is found
     return 'OTHER';
 }
-
 // Handle CSV export
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     header('Content-Type: text/csv');
