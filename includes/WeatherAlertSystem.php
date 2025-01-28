@@ -231,38 +231,56 @@ class WeatherAlertSystem {
      * @param mixed $alert The alert data containing geometry information
      * @return array Processed polygon data with type, coordinates, and validation status
      */
-    private function processPolygon($alert): array {
-        try {
-            // Check for GeoJSON geometry
-            if (isset($alert->geometry) && $alert->geometry !== null) {
-                if ($alert->geometry->type === 'Polygon') {
-                    $this->logError("Found GeoJSON polygon data");
-                    return $this->processGeoJSONPolygon($alert->geometry->coordinates[0]);
-                }
-            }
-            
-            // Check for CAP format polygon as fallback
-            if (isset($alert->info->area->polygon)) {
-                $this->logError("Found CAP format polygon data");
-                return $this->processCAPPolygon((string)$alert->info->area->polygon);
-            }
-            
-            $this->logError("No valid polygon data found");
-            return [
-                'type' => 'NONE',
-                'coordinates' => null,
-                'valid' => false
-            ];
-            
-        } catch (Exception $e) {
-            $this->logError("Error processing polygon data: " . $e->getMessage());
-            return [
-                'type' => 'NONE',
-                'coordinates' => null,
-                'valid' => false
-            ];
-        }
+    private function jsonEncode($data): string {
+    $json = json_encode($data);
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        $this->logError("JSON encoding error: " . json_last_error_msg());
+        throw new Exception("Failed to encode JSON data");
     }
+    return $json;
+}
+
+private function jsonDecode(string $json) {
+    $data = json_decode($json, true);
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        $this->logError("JSON decoding error: " . json_last_error_msg());
+        throw new Exception("Failed to decode JSON data");
+    }
+    return $data;
+}
+	
+	private function processPolygon($cap) {
+    try {
+        // Check for GeoJSON geometry
+        if (isset($cap->geometry) && $cap->geometry !== null) {
+            if ($cap->geometry->type === 'Polygon') {
+                $this->logError("Found GeoJSON polygon data");
+                return $this->processGeoJSONPolygon($cap->geometry->coordinates[0]);
+            }
+        }
+        
+        // Check for CAP format polygon as fallback
+        if (isset($cap->info->area->polygon)) {
+            $this->logError("Found CAP format polygon data");
+            return $this->processCAPPolygon((string)$cap->info->area->polygon);
+        }
+        
+        $this->logError("No valid polygon data found");
+        return [
+            'type' => 'NONE',
+            'coordinates' => null,
+            'valid' => false
+        ];
+        
+    } catch (Exception $e) {
+        $this->logError("Error processing polygon data: " . $e->getMessage());
+        return [
+            'type' => 'NONE',
+            'coordinates' => null,
+            'valid' => false
+        ];
+    }
+}
 
     /**
      * Processes GeoJSON format polygon coordinates
@@ -392,94 +410,71 @@ class WeatherAlertSystem {
      * @param SimpleXMLElement $entry The feed entry data
      * @return bool True if processing was successful
      */
-    private function processAlert(SimpleXMLElement $alertXml, SimpleXMLElement $entry): bool {
-        try {
-            // Extract basic alert information
-            $alertId = (string)$alertXml->identifier;
-            $event = (string)$alertXml->info->event;
-            $severity = (string)$alertXml->info->severity;
-            $description = (string)$alertXml->info->description;
-            $expires = $this->convertToMySQLDateTime((string)$alertXml->info->expires);
-            $effective = $this->convertToMySQLDateTime((string)$alertXml->info->effective);
-            $ends = isset($alertXml->info->ends) ? 
-                    $this->convertToMySQLDateTime((string)$alertXml->info->ends) : null;
-            $title = (string)$alertXml->info->headline;
+    private function processAlert($alertXml, $entry) {
+    try {
+        $alertId = (string)$alertXml->identifier;
+        $event = (string)$alertXml->info->event;
+        $severity = (string)$alertXml->info->severity;
+        $description = (string)$alertXml->info->description;
+        $expires = $this->convertToMySQLDateTime((string)$alertXml->info->expires);
+        $effective = $this->convertToMySQLDateTime((string)$alertXml->info->effective);
+        $ends = isset($alertXml->info->ends) ? 
+                $this->convertToMySQLDateTime((string)$alertXml->info->ends) : null;
+        $title = (string)$alertXml->info->headline;
 
-            // Extract additional fields
-            $messageType = (string)$alertXml->messageType;
-            $category = (string)$alertXml->info->category;
-            $certainty = (string)$alertXml->info->certainty;
-            $urgency = (string)$alertXml->info->urgency;
-            $response = (string)$alertXml->info->response;
-            
-            // Process geocodes
-            $sameCodes = [];
-            $ugcCodes = [];
-            if (isset($alertXml->info->area->geocode)) {
-                foreach ($alertXml->info->area->geocode as $geocode) {
-                    if ((string)$geocode->valueName === 'SAME') {
-                        $sameCodes[] = (string)$geocode->value;
-                    } elseif ((string)$geocode->valueName === 'UGC') {
-                        $ugcCodes[] = (string)$geocode->value;
-                    }
-                }
-            }
+        // Process polygon data with new method
+        $polygonData = $this->processPolygon($alertXml);
 
-            // Process polygon data
-            $polygonData = $this->processPolygon($alertXml);
+        // Check if alert already exists
+        $stmt = $this->db->prepare("SELECT id FROM alerts WHERE alert_id = ?");
+        $stmt->execute([$alertId]);
+        $existingAlert = $stmt->fetch();
 
-            // Check if alert already exists
-            $stmt = $this->db->prepare("SELECT id FROM alerts WHERE alert_id = ?");
-            $stmt->execute([$alertId]);
-            $existingAlert = $stmt->fetch();
-
-            if ($existingAlert) {
-                // Update existing alert
-                return $this->updateExistingAlert(
-                    $alertId,
-                    $event,
-                    $severity,
-                    $description,
-                    $expires,
-                    $effective,
-                    $ends,
-                    $title,
-                    $messageType,
-                    $category,
-                    $certainty,
-                    $urgency,
-                    $response,
-                    $sameCodes,
-                    $ugcCodes,
-                    $polygonData
-                );
-            } else {
-                // Insert new alert
-                return $this->insertNewAlert(
-                    $alertId,
-                    $event,
-                    $severity,
-                    $description,
-                    $expires,
-                    $effective,
-                    $ends,
-                    $title,
-                    $messageType,
-                    $category,
-                    $certainty,
-                    $urgency,
-                    $response,
-                    $sameCodes,
-                    $ugcCodes,
-                    $polygonData
-                );
-            }
-
-        } catch (Exception $e) {
-            $this->logError("Error processing alert {$alertId}: " . $e->getMessage());
-            return false;
+        if ($existingAlert) {
+            return $this->updateExistingAlert(
+                $alertId,
+                $event,
+                $severity,
+                $description,
+                $expires,
+                $effective,
+                $ends,
+                $title,
+                $messageType,
+                $category,
+                $certainty,
+                $urgency,
+                $response,
+                $sameCodes,
+                $ugcCodes,
+                $polygonData
+            );
+        } else {
+            return $this->insertNewAlert(
+                $alertId,
+                $event,
+                $severity,
+                $description,
+                $expires,
+                $effective,
+                $ends,
+                $title,
+                $messageType,
+                $category,
+                $certainty,
+                $urgency,
+                $response,
+                $sameCodes,
+                $ugcCodes,
+                $polygonData
+            );
         }
+
+    } catch (Exception $e) {
+        $this->logError("Error processing alert {$alertId}: " . $e->getMessage());
+        return false;
     }
+}
 	/**
      * Updates an existing alert in the database
      * @param string $alertId The unique identifier of the alert
@@ -722,7 +717,8 @@ class WeatherAlertSystem {
      * Creates the alerts table with all required columns
      * @throws PDOException If table creation fails
      */
-    private function createAlertsTable(): void {
+    
+	private function createAlertsTable(): void {
         try {
             $columns = [];
             foreach (self::REQUIRED_COLUMNS as $column => $definition) {
@@ -790,7 +786,79 @@ class WeatherAlertSystem {
      * @param string $alertId The unique identifier of the alert
      * @return array|null Alert details or null if not found
      */
-    public function getAlertById(string $alertId): ?array {
+    
+/**
+ * Converts alerts to GeoJSON format
+ * @param array $alerts Array of alerts to convert
+ * @return array GeoJSON formatted data
+ */
+public function alertsToGeoJSON(array $alerts): array {
+    $this->logError("Converting alerts to GeoJSON...");
+    $features = [];
+
+    foreach ($alerts as $alert) {
+        try {
+            // Base properties that all alerts should have
+            $baseProperties = [
+                "id" => $alert["id"],
+                "title" => $alert["title"],
+                "severity" => $alert["severity"] ?? "Unknown",
+                "description" => $alert["description"],
+                "expires" => $alert["expires"],
+                "urgency" => $alert["urgency"],
+                "effective" => $alert["effective"],
+                "status" => $alert["status"]
+            ];
+
+            // Check for valid polygon data
+            if ($alert["polygon_type"] === "POLYGON" && !empty($alert["polygon_coordinates"])) {
+                $coordinates = json_decode($alert["polygon_coordinates"], true);
+                if (json_last_error() === JSON_ERROR_NONE && !empty($coordinates)) {
+                    $features[] = [
+                        "type" => "Feature",
+                        "properties" => array_merge($baseProperties, [
+                            "type" => "specific",
+                            "districts" => $alert["districts"] ?? []
+                        ]),
+                        "geometry" => [
+                            "type" => "Polygon",
+                            "coordinates" => [$coordinates]
+                        ]
+                    ];
+                } else {
+                    $this->logError("Invalid polygon coordinates JSON for alert ID: " . $alert["id"]);
+                }
+            } else {
+                // Process county-wide alert
+                $features[] = [
+                    "type" => "Feature",
+                    "properties" => array_merge($baseProperties, [
+                        "type" => "county-wide",
+                        "districts" => [
+                            'fire' => ['All Fire Districts'],
+                            'ems' => ['All EMS Districts'],
+                            'electric' => ['All Electric Providers']
+                        ]
+                    ])
+                ];
+            }
+        } catch (Exception $e) {
+            $this->logError("Error processing alert to GeoJSON: " . $e->getMessage());
+            continue;
+        }
+    }
+
+    $result = [
+        "type" => "FeatureCollection",
+        "features" => $features,
+        "generated" => gmdate('Y-m-d\TH:i:s\Z')
+    ];
+
+    $this->logError("Generated GeoJSON with " . count($features) . " features");
+    return $result;
+}	
+	
+	public function getAlertById(string $alertId): ?array {
         try {
             $stmt = $this->db->prepare("
                 SELECT *,
