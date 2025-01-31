@@ -751,47 +751,223 @@ class WeatherAlertSystem {
         return $xml;
     }
 	
-	public function fetchAlerts() {
-        try {
-            $this->logError("Starting to fetch alerts from NWS feed");
-            $xml = $this->fetchXMLWithCurl(self::NWS_CAP_FEED);
-            $this->logError("Successfully fetched XML feed. Processing entries...");
+	public function fetchAlerts(): int {
+    try {
+        $context = stream_context_create([
+            'http' => [
+                'user_agent' => self::USER_AGENT,
+                'timeout' => 30
+            ]
+        ]);
 
-            $processedCount = 0;
-            $totalEntries = count($xml->entry);
-            $this->logError("Found {$totalEntries} entries in feed");
+        // Fetch GeoJSON from NWS API
+        $json = file_get_contents('https://api.weather.gov/alerts/active?zone=OHC137', false, $context);
+        if ($json === false) {
+            throw new Exception('Failed to fetch alerts from NWS API');
+        }
 
-            foreach ($xml->entry as $entry) {
-                try {
-                    $this->logError("Processing alert: " . $entry->title);
-                    $alertXml = $this->fetchXMLWithCurl($entry->link['href']);
+        $data = json_decode($json, true);
+        if (!isset($data['features'])) {
+            throw new Exception('Invalid GeoJSON format');
+        }
 
-                    if (!$this->isForPutnamCounty($alertXml)) {
-                        $this->logError("Alert skipped - not for Putnam County: " . $entry->title);
-                        continue;
-                    }
+        $newAlertCount = 0;
+        foreach ($data['features'] as $feature) {
+            $alert = $this->processGeoJSONAlert($feature);
+            
+            // Check if alert already exists
+            $stmt = $this->db->prepare("SELECT id FROM alerts WHERE cap_id = ?");
+            $stmt->execute([$alert['id']]);
+            
+            if (!$stmt->fetch()) {
+                // Insert new alert
+                $this->insertAlert($alert);
+                $newAlertCount++;
 
-                    $this->processAlert($alertXml, $entry);
-                    $processedCount++;
-                    $this->logError("Successfully processed alert: " . $entry->title);
-
-                    usleep(100000); // 100ms delay between requests
-
-                } catch (Exception $e) {
-                    $this->logError("Error processing individual alert: " . $e->getMessage());
-                    continue;
+                // Process districts if geometry exists
+                if ($alert['geometry'] !== null) {
+                    $this->processAlertDistricts($alert);
                 }
             }
+        }
 
-            $this->logError("Processing complete. Processed $processedCount alerts");
-            return $processedCount;
+        return $newAlertCount;
 
-        } catch (Exception $e) {
-            $this->logError("Error fetching alerts: " . $e->getMessage());
-            throw $e;
+    } catch (Exception $e) {
+        $this->logError("Error fetching alerts: " . $e->getMessage());
+        return 0;
+    }
+}
+
+/**
+ * Process GeoJSON alert data
+ * @param array $feature GeoJSON feature object
+ * @return array Processed alert data
+ */
+private function processGeoJSONAlert(array $feature): array {
+    $props = $feature['properties'];
+    $geom = $feature['geometry'];
+    
+    $alert = [
+        'alert_id' => $props['id'],
+        'title' => $props['headline'],
+        'event_type' => $props['event'],
+        'event' => $props['event'], // Duplicate for your schema
+        'severity' => $props['severity'],
+        'urgency' => $props['urgency'],
+        'certainty' => $props['certainty'],
+        'status' => $props['status'],
+        'message_type' => $props['messageType'],
+        'category' => $props['category'],
+        'response' => $props['response'],
+        'effective' => date('Y-m-d H:i:s', strtotime($props['effective'])),
+        'expires' => date('Y-m-d H:i:s', strtotime($props['expires'])),
+        'ends' => isset($props['ends']) ? date('Y-m-d H:i:s', strtotime($props['ends'])) : null,
+        'description' => $props['description'],
+        'polygon_type' => 'NONE',
+        'is_county_wide' => 0,
+        'affected_county' => null,
+        'polygon_valid' => 0,
+        'same_codes' => isset($props['geocode']['SAME']) ? json_encode($props['geocode']['SAME']) : null,
+        'ugc_codes' => isset($props['geocode']['UGC']) ? json_encode($props['geocode']['UGC']) : null
+    ];
+
+    // Handle geometry if present
+    if ($geom !== null && $geom['type'] === 'Polygon') {
+        $alert['polygon_type'] = 'POLYGON';
+        $alert['polygon_coordinates'] = json_encode($geom['coordinates']);
+        $alert['polygon'] = $this->convertToWKT($geom);
+        $alert['polygon_valid'] = 1;
+    }
+
+    // Check if alert is county-wide based on SAME codes or UGC codes
+    if (!empty($props['geocode']['SAME']) || !empty($props['geocode']['UGC'])) {
+        $alert['is_county_wide'] = 1;
+        // Extract county from UGC code (e.g., "WVC001" -> "Barbour")
+        if (!empty($props['geocode']['UGC'])) {
+            $alert['affected_county'] = $this->getCountyFromUGC($props['geocode']['UGC'][0]);
         }
     }
 
+    return $alert;
+}
+
+/**
+ * Convert GeoJSON geometry to WKT format for database storage
+ * @param array $geometry GeoJSON geometry object
+ * @return string WKT geometry
+ */
+private function convertToWKT(array $geometry): string {
+    if ($geometry['type'] !== 'Polygon') {
+        return null;
+    }
+
+    $coords = $geometry['coordinates'][0];
+    $points = [];
+    
+    foreach ($coords as $coord) {
+        $points[] = $coord[0] . ' ' . $coord[1];
+    }
+    
+    return 'POLYGON((' . implode(',', $points) . '))';
+}
+
+/**
+ * Insert or update alert in database
+ * @param array $alert Processed alert data
+ * @return bool Success status
+ */
+private function insertAlert(array $alert): bool {
+    try {
+        $sql = "INSERT INTO alerts (
+                    alert_id, title, event_type, event, severity, urgency, certainty,
+                    status, message_type, category, response, effective, expires, ends,
+                    description, polygon_type, polygon, is_county_wide, affected_county,
+                    polygon_coordinates, polygon_valid, same_codes, ugc_codes
+                ) VALUES (
+                    :alert_id, :title, :event_type, :event, :severity, :urgency, :certainty,
+                    :status, :message_type, :category, :response, :effective, :expires, :ends,
+                    :description, :polygon_type, ST_GeomFromText(:polygon, 4326), :is_county_wide,
+                    :affected_county, :polygon_coordinates, :polygon_valid, :same_codes, :ugc_codes
+                ) ON DUPLICATE KEY UPDATE
+                    title = VALUES(title),
+                    event_type = VALUES(event_type),
+                    event = VALUES(event),
+                    severity = VALUES(severity),
+                    urgency = VALUES(urgency),
+                    certainty = VALUES(certainty),
+                    status = VALUES(status),
+                    message_type = VALUES(message_type),
+                    category = VALUES(category),
+                    response = VALUES(response),
+                    effective = VALUES(effective),
+                    expires = VALUES(expires),
+                    ends = VALUES(ends),
+                    description = VALUES(description),
+                    polygon_type = VALUES(polygon_type),
+                    polygon = VALUES(polygon),
+                    is_county_wide = VALUES(is_county_wide),
+                    affected_county = VALUES(affected_county),
+                    polygon_coordinates = VALUES(polygon_coordinates),
+                    polygon_valid = VALUES(polygon_valid),
+                    same_codes = VALUES(same_codes),
+                    ugc_codes = VALUES(ugc_codes)";
+
+        $stmt = $this->db->prepare($sql);
+        return $stmt->execute($alert);
+
+    } catch (PDOException $e) {
+        $this->logError("Error inserting/updating alert: " . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Extract county name from UGC code
+ * @param string $ugc UGC code (e.g., "WVC001")
+ * @return string|null County name
+ */
+private function getCountyFromUGC(string $ugc): ?string {
+    // You'll need to implement a lookup table or API call to convert UGC to county name
+    // For now, we'll return the code
+    return $ugc;
+}
+
+/**
+ * Process districts affected by an alert
+ * @param array $alert Alert data
+ */
+private function processAlertDistricts(array $alert): void {
+    $sql = "SELECT type, name FROM boundaries 
+            WHERE ST_Intersects(geometry, ST_GeomFromText(?, 4326))";
+    
+    $stmt = $this->db->prepare($sql);
+    $stmt->execute([$alert['geometry']]);
+    
+    $districts = [
+        'fire' => [],
+        'ems' => [],
+        'electric' => []
+    ];
+
+    while ($row = $stmt->fetch()) {
+        if (isset($districts[$row['type']])) {
+            $districts[$row['type']][] = $row['name'];
+        }
+    }
+
+    // Store district associations
+    foreach ($districts as $type => $names) {
+        if (!empty($names)) {
+            foreach ($names as $name) {
+                $sql = "INSERT INTO alert_districts (alert_id, district_type, district_name) 
+                        VALUES (?, ?, ?)";
+                $this->db->prepare($sql)->execute([$alert['id'], $type, $name]);
+            }
+        }
+    }
+}
+	
 private function isForPutnamCounty($cap) {
         $this->logError("Checking if alert is for Putnam County...");
         
