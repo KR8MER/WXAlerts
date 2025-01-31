@@ -1,10 +1,10 @@
 <?php
 /**
  * WeatherAlertSystem.php
- * Last Modified: 2025-01-28 19:36:51 UTC
+ * Last Modified: 2025-01-31 22:18:15 UTC
  * Modified By: KR8MER
  * 
- * Enhanced version with improved polygon handling and data validation
+ * Core class for managing weather alerts and related data
  */
 
 declare(strict_types=1);
@@ -24,68 +24,62 @@ class WeatherAlertSystem {
     private const NWS_CAP_FEED = 'https://alerts.weather.gov/cap/oh.php?x=0';
     private const USER_AGENT = 'PutnamCountyAlertSystem/1.0';
     private const CACHE_DURATION = 300;
-    
-    // Alert categories with their associated event types
-    private const ALERT_CATEGORIES = [
-        'SEVERE' => [
-            'Tornado Warning',
-            'Severe Thunderstorm Warning',
-            'Flash Flood Warning'
-        ],
-        'WINTER' => [
-            'Winter Storm Warning',
-            'Ice Storm Warning',
-            'Blizzard Warning',
-            'Winter Weather Advisory'
-        ],
-        'FLOOD' => [
-            'Flood Warning',
-            'Flood Watch',
-            'Flood Advisory'
-        ],
-        'HEAT' => [
-            'Excessive Heat Warning',
-            'Heat Advisory'
-        ],
-        'WIND' => [
-            'High Wind Warning',
-            'Wind Advisory'
-        ],
-        'OTHER' => []
+
+    // Database schema constants
+    private const ALERT_COLUMNS = [
+        'id' => 'bigint(20) AUTO_INCREMENT PRIMARY KEY',
+        'alert_id' => 'varchar(255) NOT NULL UNIQUE',
+        'title' => 'varchar(255) NOT NULL',
+        'event_type' => 'varchar(100) NOT NULL',
+        'severity' => 'varchar(50) NOT NULL',
+        'urgency' => 'varchar(50) NOT NULL',
+        'description' => 'text',
+        'effective' => 'datetime NOT NULL',
+        'expires' => 'datetime NOT NULL',
+        'ends' => 'datetime NOT NULL',
+        'polygon_type' => "enum('NONE','POLYGON','CIRCLE') NOT NULL DEFAULT 'NONE'",
+        'polygon' => 'geometry NOT NULL',
+        'event' => 'varchar(100) NOT NULL',
+        'status' => "varchar(20) NOT NULL DEFAULT 'Active'",
+        'is_county_wide' => 'tinyint(1) NOT NULL DEFAULT 0',
+        'affected_county' => 'varchar(50)',
+        'certainty' => 'varchar(50)',
+        'message_type' => 'varchar(50)',
+        'category' => 'varchar(50)',
+        'response' => 'varchar(50)',
+        'polygon_coordinates' => 'longtext',
+        'polygon_valid' => 'tinyint(1) DEFAULT 0',
+        'same_codes' => 'text',
+        'ugc_codes' => 'text',
+        'created_at' => 'timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP',
+        'updated_at' => 'timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'
     ];
 
-    // Required database columns and their definitions
-    private const REQUIRED_COLUMNS = [
-        'alert_id' => 'VARCHAR(255) NOT NULL',
-        'event_type' => 'VARCHAR(255) NOT NULL',
-        'severity' => 'VARCHAR(50)',
-        'description' => 'TEXT',
-        'expires' => 'DATETIME',
-        'effective' => 'DATETIME',
-        'ends' => 'DATETIME',
-        'created_at' => 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
-        'updated_at' => 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
-        'title' => 'VARCHAR(255)',
-        'message_type' => 'VARCHAR(50)',
-        'category' => 'VARCHAR(50)',
-        'certainty' => 'VARCHAR(50)',
-        'urgency' => 'VARCHAR(50)',
-        'response' => 'VARCHAR(50)',
-        'status' => 'VARCHAR(50) DEFAULT "Active"',
-        'polygon_type' => 'VARCHAR(20) DEFAULT "NONE"',
-        'polygon_coordinates' => 'JSON',
-        'polygon_valid' => 'BOOLEAN DEFAULT FALSE',
-        'same_codes' => 'TEXT',
-        'ugc_codes' => 'TEXT'
+    private const BOUNDARY_COLUMNS = [
+        'id' => 'int(11) AUTO_INCREMENT PRIMARY KEY',
+        'name' => 'varchar(255) NOT NULL',
+        'type' => 'varchar(50) NOT NULL',
+        'properties' => 'longtext',
+        'geometry' => 'geometry NOT NULL',
+        'created_at' => 'timestamp DEFAULT CURRENT_TIMESTAMP',
+        'updated_at' => 'timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'
+    ];
+
+    private const DISTRICT_COLUMNS = [
+        'id' => 'int(11) AUTO_INCREMENT PRIMARY KEY',
+        'alert_id' => 'varchar(255) NOT NULL',
+        'district_type' => "enum('fire','ems','electric','telephone','township','school','city') NOT NULL",
+        'district_name' => 'varchar(255) NOT NULL',
+        'created_at' => 'timestamp DEFAULT CURRENT_TIMESTAMP'
     ];
 	/**
-     * Constructor - Initializes database connection and verifies schema
+     * Initialize WeatherAlertSystem with database connection
      * @throws PDOException If database connection fails
      */
     public function __construct() {
         try {
             $config = require APP_PATH . '/config/config.php';
-            $this->logError("Initializing WeatherAlertSystem...");
+            error_log("Initializing WeatherAlertSystem...");
             
             $this->db = new PDO(
                 "mysql:host={$config['host']};dbname={$config['dbname']};charset={$config['charset']}",
@@ -98,17 +92,17 @@ class WeatherAlertSystem {
                 ]
             );
             
-            $this->logError("Database connection established successfully");
+            error_log("Database connection established successfully");
             $this->verifyTableSchema();
         } catch (PDOException $e) {
-            $this->logError("Database connection error: " . $e->getMessage());
+            error_log("Database connection error: " . $e->getMessage());
             throw new PDOException("Database connection failed: " . $e->getMessage());
         }
     }
 
     /**
-     * Logs error messages with counter limit
-     * @param string $message The message to log
+     * Log error messages with rate limiting
+     * @param string $message Error message to log
      */
     private function logError(string $message): void {
         if ($this->logCounter < $this->logLimit || $this->debugMode) {
@@ -118,73 +112,589 @@ class WeatherAlertSystem {
     }
 
     /**
-     * Sets debug mode status
-     * @param bool $mode True to enable debug mode, false to disable
+     * Set debug mode status
+     * @param bool $mode Debug mode enabled/disabled
      */
     public function setDebugMode(bool $mode): void {
         $this->debugMode = $mode;
-        $this->logError("Debug mode " . ($mode ? "enabled" : "disabled"));
+        error_log("Debug mode " . ($mode ? "enabled" : "disabled"));
     }
 
     /**
-     * Encodes data to JSON with error handling
-     * @param mixed $data The data to encode
-     * @return string JSON encoded string
-     * @throws Exception If JSON encoding fails
+     * Verify and update database schema
+     * @throws Exception If schema verification fails
      */
-    private function jsonEncode($data): string {
-        $json = json_encode($data);
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            $this->logError("JSON encoding error: " . json_last_error_msg());
-            throw new Exception("Failed to encode JSON data");
-        }
-        return $json;
-    }
-
-    /**
-     * Decodes JSON string with error handling
-     * @param string $json The JSON string to decode
-     * @return mixed Decoded data
-     * @throws Exception If JSON decoding fails
-     */
-    private function jsonDecode(string $json) {
-        $data = json_decode($json, true);
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            $this->logError("JSON decoding error: " . json_last_error_msg());
-            throw new Exception("Failed to decode JSON data");
-        }
-        return $data;
-    }
-
-    /**
-     * Converts a date string to MySQL datetime format in UTC
-     * @param string $dateStr The date string to convert
-     * @return string MySQL formatted datetime string
-     * @throws Exception If date parsing fails
-     */
-    private function convertToMySQLDateTime(string $dateStr): string {
+    private function verifyTableSchema(): void {
         try {
-            $date = new DateTime($dateStr);
-            $date->setTimezone(new DateTimeZone('UTC'));
-            return $date->format('Y-m-d H:i:s');
+            // Verify alerts table
+            $this->verifyTable('alerts', self::ALERT_COLUMNS);
+            
+            // Verify boundaries table
+            $this->verifyTable('boundaries', self::BOUNDARY_COLUMNS);
+            
+            // Verify districts table
+            $this->verifyTable('districts', self::DISTRICT_COLUMNS);
+            
+            $this->logError("Schema verification completed successfully");
+        } catch (PDOException $e) {
+            $this->logError("Schema verification failed: " . $e->getMessage());
+            throw new Exception("Failed to verify database schema: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Verify and update specific table schema
+     * @param string $tableName Name of table to verify
+     * @param array $columns Expected columns
+     */
+    private function verifyTable(string $tableName, array $columns): void {
+        // Check if table exists
+        $tableExists = $this->db->query("
+            SELECT COUNT(*) 
+            FROM information_schema.tables 
+            WHERE table_schema = DATABASE()
+            AND table_name = '$tableName'
+        ")->fetchColumn();
+
+        if (!$tableExists) {
+            $this->createTable($tableName, $columns);
+            return;
+        }
+
+        // Get existing columns
+        $stmt = $this->db->query("
+            SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+            AND table_name = '$tableName'
+        ");
+        
+        $existingColumns = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $existingColumnNames = array_column($existingColumns, 'COLUMN_NAME');
+
+        // Check for missing columns
+        foreach ($columns as $columnName => $definition) {
+            if (!in_array($columnName, $existingColumnNames)) {
+                $this->logError("Adding missing column: $columnName to $tableName");
+                $this->db->exec("ALTER TABLE $tableName ADD COLUMN $columnName $definition");
+            }
+        }
+    }
+
+    /**
+     * Create a new table with specified schema
+     * @param string $tableName Name of table to create
+     * @param array $columns Column definitions
+     */
+    private function createTable(string $tableName, array $columns): void {
+        $columnDefs = array_map(
+            function ($name, $definition) {
+                return "$name $definition";
+            },
+            array_keys($columns),
+            $columns
+        );
+
+        $sql = "CREATE TABLE $tableName (
+            " . implode(",\n            ", $columnDefs) . "
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+        $this->db->exec($sql);
+        
+        // Add indexes based on table type
+        switch ($tableName) {
+            case 'alerts':
+                $this->db->exec("CREATE INDEX idx_alert_status ON alerts(status)");
+                $this->db->exec("CREATE INDEX idx_alert_expires ON alerts(expires)");
+                $this->db->exec("CREATE SPATIAL INDEX idx_alert_polygon ON alerts(polygon)");
+                break;
+                
+            case 'boundaries':
+                $this->db->exec("CREATE INDEX idx_boundary_type ON boundaries(type)");
+                $this->db->exec("CREATE SPATIAL INDEX idx_boundary_geometry ON boundaries(geometry)");
+                break;
+                
+            case 'districts':
+                $this->db->exec("CREATE INDEX idx_district_alert ON districts(alert_id)");
+                $this->db->exec("CREATE INDEX idx_district_type ON districts(district_type)");
+                break;
+        }
+
+        $this->logError("Created $tableName table with schema version " . date('YmdHis'));
+    }
+
+    /**
+     * Test database connection
+     * @return array Connection status and message
+     */
+    /**
+     * Test the connection to weather alert feed
+     * @return array Connection test results
+     */
+    public function testConnection(): array {
+        try {
+            // First test database connection
+            $this->db->query('SELECT 1');
+
+            // Now test alert feed connection
+            $context = stream_context_create([
+                'http' => [
+                    'user_agent' => self::USER_AGENT,
+                    'timeout' => 30
+                ]
+            ]);
+
+            $feed = file_get_contents(self::NWS_CAP_FEED, false, $context);
+            if ($feed === false) {
+                return [
+                    'success' => false,
+                    'message' => 'Failed to connect to NWS CAP feed',
+                    'entry_count' => 0
+                ];
+            }
+
+            $xml = simplexml_load_string($feed);
+            if ($xml === false) {
+                return [
+                    'success' => false,
+                    'message' => 'Failed to parse NWS CAP feed',
+                    'entry_count' => 0
+                ];
+            }
+
+            // Count entries in the feed
+            $entries = $xml->xpath('//entry');
+            $entry_count = count($entries);
+
+            return [
+                'success' => true,
+                'message' => 'Connection successful',
+                'entry_count' => $entry_count
+            ];
+
         } catch (Exception $e) {
-            $this->logError("Date conversion error for '$dateStr': " . $e->getMessage());
-            throw new Exception("Invalid date format: $dateStr");
+            return [
+                'success' => false,
+                'message' => $e->getMessage(),
+                'entry_count' => 0
+            ];
         }
     }
 	/**
-     * Fetches XML data from a URL with caching
-     * @param string $url The URL to fetch from
-     * @return SimpleXMLElement The parsed XML data
-     * @throws Exception If fetching or parsing fails
+     * Get a specific alert by ID
+     * @param string|int $id Alert ID or database ID
+     * @return array|null Alert data or null if not found
      */
-    private function fetchXMLWithCurl(string $url): SimpleXMLElement {
+    public function getAlert($id): ?array {
+        try {
+            $stmt = $this->db->prepare("
+                SELECT *,
+                    ST_AsText(polygon) as polygon_text,
+                    ST_AsGeoJSON(polygon) as polygon_geojson
+                FROM alerts 
+                WHERE id = ? OR alert_id = ?
+                LIMIT 1
+            ");
+            $stmt->execute([$id, $id]);
+            $alert = $stmt->fetch();
+            
+            if (!$alert) {
+                return null;
+            }
+
+            // Add affected districts
+            $alert['affected_districts'] = $this->getAffectedDistricts($alert);
+            
+            return $alert;
+        } catch (PDOException $e) {
+            $this->logError("Error fetching alert $id: " . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Get all currently active alerts
+     * @return array List of active alerts
+     */
+    public function getActiveAlerts(): array {
+        try {
+            $currentTime = gmdate('Y-m-d H:i:s');
+            $stmt = $this->db->prepare("
+                SELECT *,
+                    ST_AsText(polygon) as polygon_text,
+                    ST_AsGeoJSON(polygon) as polygon_geojson
+                FROM alerts 
+                WHERE status = 'Active' 
+                AND effective <= ? 
+                AND expires > ?
+                ORDER BY 
+                    FIELD(severity, 'Extreme', 'Severe', 'Moderate', 'Minor') DESC,
+                    created_at DESC
+            ");
+            
+            $stmt->execute([$currentTime, $currentTime]);
+            $alerts = $stmt->fetchAll();
+            
+            // Add district information for each alert
+            foreach ($alerts as &$alert) {
+                $alert['affected_districts'] = $this->getAffectedDistricts($alert);
+            }
+            
+            return $alerts;
+        } catch (PDOException $e) {
+            $this->logError("Error fetching active alerts: " . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Search alerts with filters
+     * @param array|string $filters Filter parameters or search string
+     * @return array Filtered alerts
+     */
+    public function searchAlerts(array|string $filters = []): array {
+        try {
+            // Convert string input to search filter array
+            if (is_string($filters)) {
+                $filters = ['search' => $filters];
+            }
+
+            // Ensure filters is an array
+            $filters = is_array($filters) ? $filters : [];
+
+            $where = ['1=1'];
+            $params = [];
+
+            // Apply text search
+            if (!empty($filters['search'])) {
+                $where[] = "(title LIKE ? OR description LIKE ? OR event_type LIKE ?)";
+                $searchPattern = "%{$filters['search']}%";
+                $params = array_merge($params, [$searchPattern, $searchPattern, $searchPattern]);
+            }
+
+            // Apply category filter
+            if (!empty($filters['category'])) {
+                $where[] = "category = ?";
+                $params[] = $filters['category'];
+            }
+
+            // Apply severity filter
+            if (!empty($filters['severity'])) {
+                $where[] = "severity = ?";
+                $params[] = $filters['severity'];
+            }
+
+            // Apply date range filters
+            if (!empty($filters['start_date'])) {
+                $where[] = "created_at >= ?";
+                $params[] = $this->convertToMySQLDateTime($filters['start_date']);
+            }
+            if (!empty($filters['end_date'])) {
+                $where[] = "created_at <= ?";
+                $params[] = $this->convertToMySQLDateTime($filters['end_date']);
+            }
+
+            // Apply status filter
+            if (!empty($filters['status'])) {
+                $where[] = "status = ?";
+                $params[] = $filters['status'];
+            }
+
+            // Apply county-wide filter
+            if (isset($filters['is_county_wide'])) {
+                $where[] = "is_county_wide = ?";
+                $params[] = (int)$filters['is_county_wide'];
+            }
+
+            // Build and execute query
+            $limit = isset($filters['limit']) ? (int)$filters['limit'] : 100;
+            $sql = "SELECT *,
+                    ST_AsText(polygon) as polygon_text,
+                    ST_AsGeoJSON(polygon) as polygon_geojson
+                   FROM alerts 
+                   WHERE " . implode(" AND ", $where) . 
+                   " ORDER BY created_at DESC LIMIT ?";
+            
+            $params[] = $limit;
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute($params);
+            
+            $alerts = $stmt->fetchAll();
+            
+            // Add district information
+            foreach ($alerts as &$alert) {
+                $alert['affected_districts'] = $this->getAffectedDistricts($alert);
+            }
+            
+            return $alerts;
+
+        } catch (PDOException $e) {
+            $this->logError("Search alerts error: " . $e->getMessage());
+            return [];
+        } catch (Exception $e) {
+            $this->logError("Search parameter error: " . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Clean up expired alerts and update alert statuses
+     * @param int $daysToKeep Number of days to keep expired alerts
+     * @return array Results of cleanup operation
+     */
+    public function cleanupAlerts(int $daysToKeep = 30): array {
+        try {
+            // Update expired alerts
+            $stmt = $this->db->prepare("
+                UPDATE alerts 
+                SET status = 'Expired'
+                WHERE status = 'Active'
+                AND expires < UTC_TIMESTAMP()
+            ");
+            $stmt->execute();
+            $expiredCount = $stmt->rowCount();
+
+            // Delete old expired alerts
+            $stmt = $this->db->prepare("
+                DELETE a FROM alerts a
+                LEFT JOIN districts d ON a.alert_id = d.alert_id
+                WHERE a.status = 'Expired'
+                AND a.expires < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY)
+            ");
+            $stmt->execute([$daysToKeep]);
+            $deletedCount = $stmt->rowCount();
+
+            return [
+                'expired' => $expiredCount,
+                'deleted' => $deletedCount,
+                'timestamp' => date('Y-m-d H:i:s')
+            ];
+
+        } catch (PDOException $e) {
+            $this->logError("Error cleaning up alerts: " . $e->getMessage());
+            return [
+                'expired' => 0,
+                'deleted' => 0,
+                'error' => $e->getMessage(),
+                'timestamp' => date('Y-m-d H:i:s')
+            ];
+        }
+    }
+	/**
+     * Get comprehensive alert statistics
+     * @return array Alert statistics
+     */
+    /**
+     * Get alert statistics
+     * @return array Alert statistics
+     */
+    public function getAlertStats(): array {
+        try {
+            return [
+                'active' => $this->getActiveAlertCount(),
+                'last24h' => [
+                    'total_alerts' => $this->getTotalAlerts24h(),
+                    'extreme_alerts' => $this->getExtremeAlerts24h(),
+                    'unique_types' => $this->getUniqueAlertTypes24h()
+                ]
+            ];
+        } catch (Exception $e) {
+            $this->logError("Error getting alert stats: " . $e->getMessage());
+            return [
+                'active' => 0,
+                'last24h' => [
+                    'total_alerts' => 0,
+                    'extreme_alerts' => 0,
+                    'unique_types' => 0
+                ]
+            ];
+        }
+    }
+
+    /**
+     * Get alert trend data for specified period
+     * @param string $period Period to analyze ('hourly', 'daily', 'weekly', 'monthly')
+     * @param int $limit Number of periods to return
+     * @return array Trend data
+     */
+    public function getAlertTrends(string $period = 'daily', int $limit = 30): array {
+        try {
+            $grouping = match($period) {
+                'hourly' => 'DATE_FORMAT(created_at, "%Y-%m-%d %H:00:00")',
+                'daily' => 'DATE(created_at)',
+                'weekly' => 'DATE(DATE_SUB(created_at, INTERVAL WEEKDAY(created_at) DAY))',
+                'monthly' => 'DATE_FORMAT(created_at, "%Y-%m-01")',
+                default => throw new InvalidArgumentException("Invalid period: $period")
+            };
+
+            $sql = "
+                SELECT 
+                    $grouping as period,
+                    COUNT(*) as total,
+                    SUM(is_county_wide) as county_wide,
+                    COUNT(DISTINCT event_type) as unique_types,
+                    GROUP_CONCAT(DISTINCT event_type) as event_types
+                FROM alerts 
+                GROUP BY period
+                ORDER BY period DESC
+                LIMIT ?
+            ";
+
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute([$limit]);
+            
+            return [
+                'period' => $period,
+                'data' => $stmt->fetchAll(),
+                'timestamp' => date('Y-m-d H:i:s')
+            ];
+
+        } catch (PDOException $e) {
+            $this->logError("Error getting alert trends: " . $e->getMessage());
+            return [
+                'period' => $period,
+                'error' => $e->getMessage(),
+                'timestamp' => date('Y-m-d H:i:s')
+            ];
+        }
+    }
+	/**
+     * Get affected districts for an alert
+     * @param array $alert Alert data
+     * @return array Districts by type
+     */
+    public function getAffectedDistricts(array $alert): array {
+        try {
+            if (empty($alert['alert_id'])) {
+                throw new Exception("Alert ID is required");
+            }
+
+            $stmt = $this->db->prepare("
+                SELECT district_type, GROUP_CONCAT(district_name) as names
+                FROM districts
+                WHERE alert_id = ?
+                GROUP BY district_type
+                ORDER BY district_type
+            ");
+            
+            $stmt->execute([$alert['alert_id']]);
+            
+            $districts = [
+                'fire' => [],
+                'ems' => [],
+                'electric' => [],
+                'telephone' => [],
+                'township' => [],
+                'school' => [],
+                'city' => []
+            ];
+
+            while ($row = $stmt->fetch()) {
+                $districts[$row['district_type']] = explode(',', $row['names']);
+            }
+
+            // If county-wide alert, include all districts
+            if ($alert['is_county_wide']) {
+                foreach ($districts as $type => &$names) {
+                    if (empty($names)) {
+                        $names = $this->getAllDistrictNames($type);
+                    }
+                }
+            }
+
+            return $districts;
+
+        } catch (PDOException $e) {
+            $this->logError("Error getting affected districts: " . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Get all district names of a specific type
+     * @param string $type District type
+     * @return array District names
+     */
+    private function getAllDistrictNames(string $type): array {
+        try {
+            $stmt = $this->db->prepare("
+                SELECT DISTINCT name 
+                FROM boundaries 
+                WHERE type = ?
+                ORDER BY name
+            ");
+            $stmt->execute([$type]);
+            return $stmt->fetchAll(PDO::FETCH_COLUMN);
+        } catch (PDOException $e) {
+            $this->logError("Error getting district names: " . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Get boundary data for mapping
+     * @param string $type Boundary type
+     * @return array GeoJSON formatted boundary data
+     */
+    public function getBoundaryData(string $type): array {
+        try {
+            // Validate boundary type
+            $validTypes = ['fire', 'ems', 'electric', 'telephone', 'township', 'school', 'city'];
+            if (!in_array($type, $validTypes)) {
+                throw new InvalidArgumentException("Invalid boundary type: $type");
+            }
+
+            $stmt = $this->db->prepare("
+                SELECT 
+                    name,
+                    ST_AsGeoJSON(geometry) as geometry,
+                    properties
+                FROM boundaries
+                WHERE type = ?
+                ORDER BY name ASC
+            ");
+            
+            $stmt->execute([$type]);
+            $features = [];
+            
+            while ($row = $stmt->fetch()) {
+                $properties = json_decode($row['properties'] ?? '{}', true) ?: [];
+                $properties['name'] = $row['name'];
+                
+                $features[] = [
+                    'type' => 'Feature',
+                    'geometry' => json_decode($row['geometry']),
+                    'properties' => $properties
+                ];
+            }
+
+            return [
+                'type' => 'FeatureCollection',
+                'features' => $features,
+                'timestamp' => date('Y-m-d H:i:s')
+            ];
+
+        } catch (PDOException $e) {
+            $this->logError("Error fetching boundary data: " . $e->getMessage());
+            return [
+                'type' => 'FeatureCollection', 
+                'features' => [],
+                'error' => $e->getMessage(),
+                'timestamp' => date('Y-m-d H:i:s')
+            ];
+        }
+    }
+
+    /**
+     * Fetch alerts from NWS CAP feed
+     * @return array Result of fetch operation
+     */
+    
+	private function fetchXMLWithCurl($url) {
         $urlString = (string)$url;
         $cacheKey = md5($urlString);
 
-        // Check cache first
-        if (isset($this->cache[$cacheKey]) && 
-            (time() - $this->cache[$cacheKey]['time'] < self::CACHE_DURATION)) {
+        if (isset($this->cache[$cacheKey]) && (time() - $this->cache[$cacheKey]['time'] < self::CACHE_DURATION)) {
             $this->logError("Using cached data for URL: " . $urlString);
             return $this->cache[$cacheKey]['data'];
         }
@@ -227,13 +737,12 @@ class WeatherAlertSystem {
             throw new Exception("Failed to fetch data from URL: " . $urlString);
         }
 
-        $xml = @simplexml_load_string($response);
+        $xml = simplexml_load_string($response);
         if (!$xml) {
             $this->logError("Failed to parse XML response");
             throw new Exception("Failed to parse XML response");
         }
 
-        // Store in cache
         $this->cache[$cacheKey] = [
             'time' => time(),
             'data' => $xml
@@ -241,177 +750,8 @@ class WeatherAlertSystem {
 
         return $xml;
     }
-
-    /**
-     * Checks if an alert is for Putnam County
-     * @param SimpleXMLElement $cap The CAP alert data
-     * @return bool True if alert is for Putnam County
-     */
-    private function isForPutnamCounty(SimpleXMLElement $cap): bool {
-        $this->logError("Checking if alert is for Putnam County...");
-        
-        if (!isset($cap->info->area->geocode)) {
-            $this->logError("No geocode found in alert");
-            return false;
-        }
-
-        foreach ($cap->info->area->geocode as $geocode) {
-            if ((string)$geocode->valueName === 'SAME' && 
-                (string)$geocode->value === self::PUTNAM_FIPS) {
-                $this->logError("Match found! Alert is for Putnam County");
-                return true;
-            }
-        }
-
-        $this->logError("No match found - alert is not for Putnam County");
-        return false;
-    }
-
-    /**
-     * Validates coordinate pairs
-     * @param float $lon Longitude
-     * @param float $lat Latitude
-     * @return bool True if coordinates are valid
-     */
-    private function validateCoordinates(float $lon, float $lat): bool {
-        return $lon >= -180 && $lon <= 180 && $lat >= -90 && $lat <= 90;
-    }
-
-    /**
-     * Validates a polygon's coordinates
-     * @param array $coordinates Array of coordinate pairs
-     * @return bool True if polygon is valid
-     */
-    private function isValidPolygon(array $coordinates): bool {
-        if (count($coordinates) < 3) {
-            return false;
-        }
-
-        foreach ($coordinates as $coord) {
-            if (!is_array($coord) || count($coord) !== 2) {
-                return false;
-            }
-            if (!$this->validateCoordinates($coord[0], $coord[1])) {
-                return false;
-            }
-        }
-
-        // Check if polygon is closed
-        $first = reset($coordinates);
-        $last = end($coordinates);
-        return $first[0] === $last[0] && $first[1] === $last[1];
-    }
-	/**
-     * Processes and validates polygon data from an alert
-     * @param mixed $cap The alert data containing geometry information
-     * @return array Processed polygon data with type, coordinates, and validation status
-     */
-    private function processPolygon($cap) {
-        try {
-            // Check for GeoJSON geometry
-            if (isset($cap->geometry) && $cap->geometry !== null) {
-                if ($cap->geometry->type === 'Polygon') {
-                    $this->logError("Found GeoJSON polygon data");
-                    return $this->processGeoJSONPolygon($cap->geometry->coordinates[0]);
-                }
-            }
-            
-            // Check for CAP format polygon as fallback
-            if (isset($cap->info->area->polygon)) {
-                $this->logError("Found CAP format polygon data");
-                return $this->processCAPPolygon((string)$cap->info->area->polygon);
-            }
-            
-            $this->logError("No valid polygon data found");
-            return [
-                'type' => 'NONE',
-                'coordinates' => null,
-                'valid' => false
-            ];
-            
-        } catch (Exception $e) {
-            $this->logError("Error processing polygon data: " . $e->getMessage());
-            return [
-                'type' => 'NONE',
-                'coordinates' => null,
-                'valid' => false
-            ];
-        }
-    }
-
-    /**
-     * Processes GeoJSON format polygon coordinates
-     * @param array $coordinates Array of coordinate pairs
-     * @return array Processed polygon data
-     */
-    private function processGeoJSONPolygon(array $coordinates): array {
-        $processedCoords = [];
-        foreach ($coordinates as $point) {
-            if (count($point) >= 2) {
-                $lon = floatval($point[0]);
-                $lat = floatval($point[1]);
-                
-                if ($this->validateCoordinates($lon, $lat)) {
-                    $processedCoords[] = [$lon, $lat];
-                } else {
-                    $this->logError("Invalid coordinate values: lon=$lon, lat=$lat");
-                }
-            }
-        }
-        
-        return $this->finalizePolygon($processedCoords);
-    }
-
-    /**
-     * Processes CAP format polygon string
-     * @param string $polygonStr Space-separated lat,lon pairs
-     * @return array Processed polygon data
-     */
-    private function processCAPPolygon(string $polygonStr): array {
-        $coordinates = [];
-        $points = explode(' ', trim($polygonStr));
-        
-        foreach ($points as $point) {
-            $parts = explode(',', trim($point));
-            if (count($parts) === 2) {
-                $lat = floatval($parts[0]);
-                $lon = floatval($parts[1]);
-                
-                if ($this->validateCoordinates($lon, $lat)) {
-                    $coordinates[] = [$lon, $lat];
-                }
-            }
-        }
-        
-        return $this->finalizePolygon($coordinates);
-    }
-
-    /**
-     * Finalizes polygon processing by ensuring it's closed and valid
-     * @param array $coordinates Array of coordinate pairs
-     * @return array Processed polygon data
-     */
-    private function finalizePolygon(array $coordinates): array {
-        // Ensure polygon is closed
-        if (count($coordinates) > 2 && 
-            ($coordinates[0][0] !== end($coordinates)[0] || 
-             $coordinates[0][1] !== end($coordinates)[1])) {
-            $coordinates[] = $coordinates[0];
-        }
-        
-        return [
-            'type' => 'POLYGON',
-            'coordinates' => json_encode($coordinates),
-            'valid' => count($coordinates) >= 4  // Minimum 3 points plus closing point
-        ];
-    }
-
-    /**
-     * Fetches alerts from NWS feed
-     * @return int Number of processed alerts
-     * @throws Exception If alert fetching fails
-     */
-    public function fetchAlerts(): int {
+	
+	public function fetchAlerts() {
         try {
             $this->logError("Starting to fetch alerts from NWS feed");
             $xml = $this->fetchXMLWithCurl(self::NWS_CAP_FEED);
@@ -431,12 +771,12 @@ class WeatherAlertSystem {
                         continue;
                     }
 
-                    if ($this->processAlert($alertXml, $entry)) {
-                        $processedCount++;
-                        $this->logError("Successfully processed alert: " . $entry->title);
-                    }
+                    $this->processAlert($alertXml, $entry);
+                    $processedCount++;
+                    $this->logError("Successfully processed alert: " . $entry->title);
 
                     usleep(100000); // 100ms delay between requests
+
                 } catch (Exception $e) {
                     $this->logError("Error processing individual alert: " . $e->getMessage());
                     continue;
@@ -451,540 +791,406 @@ class WeatherAlertSystem {
             throw $e;
         }
     }
-	/**
-     * Processes and stores an individual alert
-     * @param SimpleXMLElement $alertXml The alert XML data
-     * @param SimpleXMLElement $entry The feed entry data
-     * @return bool True if processing was successful
-     */
-    private function processAlert($alertXml, $entry): bool {
-        try {
-            $alertId = (string)$alertXml->identifier;
-            $event = (string)$alertXml->info->event;
-            $severity = (string)$alertXml->info->severity;
-            $description = (string)$alertXml->info->description;
-            $expires = $this->convertToMySQLDateTime((string)$alertXml->info->expires);
-            $effective = $this->convertToMySQLDateTime((string)$alertXml->info->effective);
-            $ends = isset($alertXml->info->ends) ? 
-                    $this->convertToMySQLDateTime((string)$alertXml->info->ends) : null;
-            $title = (string)$alertXml->info->headline;
-            $messageType = (string)$alertXml->msgType;
-            $category = (string)$alertXml->info->category;
-            $certainty = (string)$alertXml->info->certainty;
-            $urgency = (string)$alertXml->info->urgency;
-            $response = (string)$alertXml->info->response;
 
-            // Extract SAME and UGC codes
-            $sameCodes = [];
-            $ugcCodes = [];
-            if (isset($alertXml->info->area->geocode)) {
-                foreach ($alertXml->info->area->geocode as $geocode) {
-                    if ((string)$geocode->valueName === 'SAME') {
-                        $sameCodes[] = (string)$geocode->value;
-                    } elseif ((string)$geocode->valueName === 'UGC') {
-                        $ugcCodes[] = (string)$geocode->value;
-                    }
-                }
-            }
-
-            // Process polygon data
-            $polygonData = $this->processPolygon($alertXml);
-
-            // Check if alert already exists
-            $stmt = $this->db->prepare("SELECT id FROM alerts WHERE alert_id = ?");
-            $stmt->execute([$alertId]);
-            $existingAlert = $stmt->fetch();
-
-            if ($existingAlert) {
-                return $this->updateExistingAlert(
-                    $alertId,
-                    $event,
-                    $severity,
-                    $description,
-                    $expires,
-                    $effective,
-                    $ends,
-                    $title,
-                    $messageType,
-                    $category,
-                    $certainty,
-                    $urgency,
-                    $response,
-                    $sameCodes,
-                    $ugcCodes,
-                    $polygonData
-                );
-            } else {
-                return $this->insertNewAlert(
-                    $alertId,
-                    $event,
-                    $severity,
-                    $description,
-                    $expires,
-                    $effective,
-                    $ends,
-                    $title,
-                    $messageType,
-                    $category,
-                    $certainty,
-                    $urgency,
-                    $response,
-                    $sameCodes,
-                    $ugcCodes,
-                    $polygonData
-                );
-            }
-
-        } catch (Exception $e) {
-            $this->logError("Error processing alert {$alertId}: " . $e->getMessage());
+private function isForPutnamCounty($cap) {
+        $this->logError("Checking if alert is for Putnam County...");
+        
+        if (!isset($cap->info->area->geocode)) {
+            $this->logError("No geocode found in alert");
             return false;
         }
+
+        foreach ($cap->info->area->geocode as $geocode) {
+            if ((string)$geocode->valueName === 'SAME' && 
+                (string)$geocode->value === self::PUTNAM_FIPS) {
+                $this->logError("Match found! Alert is for Putnam County");
+                return true;
+            }
+        }
+
+        $this->logError("No match found - alert is not for Putnam County");
+        return false;
     }
+
+    private function processPolygon($cap) {
+        if (!isset($cap->info)) {
+            $this->logError("No info section found in CAP");
+            return ['type' => 'NONE', 'coordinates' => null];
+        }
+
+        $info = $cap->info;
+
+        if (isset($info->area->polygon)) {
+            $this->logError("Found polygon data");
+            return [
+                'type' => 'POLYGON',
+                'coordinates' => (string)$info->area->polygon
+            ];
+        }
+
+        if (isset($info->area->circle)) {
+            $this->logError("Found circle data");
+            return [
+                'type' => 'CIRCLE',
+                'coordinates' => (string)$info->area->circle
+            ];
+        }
+
+        $this->logError("No geometry data found");
+        return [
+            'type' => 'NONE',
+            'coordinates' => null
+        ];
+    }
+
+
 
     /**
-     * Updates an existing alert in the database
-     * @param string $alertId The unique identifier of the alert
-     * @param array $data The alert data to update
-     * @return bool True if update was successful
-     */
-    private function updateExistingAlert(
-        string $alertId,
-        string $event,
-        string $severity,
-        string $description,
-        string $expires,
-        string $effective,
-        ?string $ends,
-        string $title,
-        string $messageType,
-        string $category,
-        string $certainty,
-        string $urgency,
-        string $response,
-        array $sameCodes,
-        array $ugcCodes,
-        array $polygonData
-    ): bool {
-        try {
-            $stmt = $this->db->prepare("
-                UPDATE alerts SET
-                    event_type = ?,
-                    severity = ?,
-                    description = ?,
-                    expires = ?,
-                    effective = ?,
-                    ends = ?,
-                    title = ?,
-                    message_type = ?,
-                    category = ?,
-                    certainty = ?,
-                    urgency = ?,
-                    response = ?,
-                    same_codes = ?,
-                    ugc_codes = ?,
-                    polygon_type = ?,
-                    polygon_coordinates = ?,
-                    polygon_valid = ?,
-                    updated_at = UTC_TIMESTAMP()
-                WHERE alert_id = ?
-            ");
-
-            return $stmt->execute([
-                $event,
-                $severity,
-                $description,
-                $expires,
-                $effective,
-                $ends,
-                $title,
-                $messageType,
-                $category,
-                $certainty,
-                $urgency,
-                $response,
-                $this->jsonEncode($sameCodes),
-                $this->jsonEncode($ugcCodes),
-                $polygonData['type'],
-                $polygonData['coordinates'],
-                $polygonData['valid'],
-                $alertId
-            ]);
-
-        } catch (PDOException $e) {
-            $this->logError("Database error updating alert {$alertId}: " . $e->getMessage());
-            return false;
-        }
-    }
-	/**
-     * Inserts a new alert into the database
-     * @param string $alertId The unique identifier of the alert
-     * @param array $data The alert data to insert
-     * @return bool True if insertion was successful
-     */
-    private function insertNewAlert(
-        string $alertId,
-        string $event,
-        string $severity,
-        string $description,
-        string $expires,
-        string $effective,
-        ?string $ends,
-        string $title,
-        string $messageType,
-        string $category,
-        string $certainty,
-        string $urgency,
-        string $response,
-        array $sameCodes,
-        array $ugcCodes,
-        array $polygonData
-    ): bool {
-        try {
-            $stmt = $this->db->prepare("
-                INSERT INTO alerts (
-                    alert_id,
-                    event_type,
-                    severity,
-                    description,
-                    expires,
-                    effective,
-                    ends,
-                    title,
-                    message_type,
-                    category,
-                    certainty,
-                    urgency,
-                    response,
-                    same_codes,
-                    ugc_codes,
-                    polygon_type,
-                    polygon_coordinates,
-                    polygon_valid,
-                    created_at,
-                    status
-                ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), 'Active'
-                )
-            ");
-
-            return $stmt->execute([
-                $alertId,
-                $event,
-                $severity,
-                $description,
-                $expires,
-                $effective,
-                $ends,
-                $title,
-                $messageType,
-                $category,
-                $certainty,
-                $urgency,
-                $response,
-                $this->jsonEncode($sameCodes),
-                $this->jsonEncode($ugcCodes),
-                $polygonData['type'],
-                $polygonData['coordinates'],
-                $polygonData['valid']
-            ]);
-
-        } catch (PDOException $e) {
-            $this->logError("Database error inserting alert {$alertId}: " . $e->getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Converts alerts to GeoJSON format
+     * Convert alerts to GeoJSON format for mapping
      * @param array $alerts Array of alerts to convert
-     * @return array GeoJSON formatted data
+     * @return array GeoJSON formatted alert data
      */
     public function alertsToGeoJSON(array $alerts): array {
-        $this->logError("Converting alerts to GeoJSON...");
-        $features = [];
+        try {
+            $features = [];
 
-        foreach ($alerts as $alert) {
-            try {
-                // Base properties that all alerts should have
-                $baseProperties = [
-                    "id" => $alert["id"],
-                    "title" => $alert["title"],
-                    "severity" => $alert["severity"] ?? "Unknown",
-                    "description" => $alert["description"],
-                    "expires" => $alert["expires"],
-                    "urgency" => $alert["urgency"],
-                    "effective" => $alert["effective"],
-                    "status" => $alert["status"]
+            foreach ($alerts as $alert) {
+                // Skip alerts without geometry
+                if (empty($alert['polygon']) || $alert['polygon_type'] === 'NONE') {
+                    continue;
+                }
+
+                // Use existing GeoJSON if available
+                $geometry = !empty($alert['polygon_geojson']) 
+                    ? json_decode($alert['polygon_geojson'], true)
+                    : null;
+
+                // If no GeoJSON available, try to parse polygon_coordinates
+                if (!$geometry && !empty($alert['polygon_coordinates'])) {
+                    $geometry = json_decode($alert['polygon_coordinates'], true);
+                }
+
+                // Skip if no valid geometry found
+                if (!$geometry) {
+                    continue;
+                }
+
+                // Build properties for the feature
+                $properties = [
+                    'id' => $alert['id'],
+                    'alert_id' => $alert['alert_id'],
+                    'title' => $alert['title'],
+                    'event_type' => $alert['event_type'],
+                    'severity' => $alert['severity'],
+                    'urgency' => $alert['urgency'],
+                    'expires' => $alert['expires'],
+                    'status' => $alert['status'],
+                    'description' => $alert['description'] ?? '',
+                    'is_county_wide' => (bool)($alert['is_county_wide'] ?? false),
+                    'created_at' => $alert['created_at'],
+                    'updated_at' => $alert['updated_at']
                 ];
 
-                // Check for valid polygon data
-                if ($alert["polygon_type"] === "POLYGON" && !empty($alert["polygon_coordinates"])) {
-                    $coordinates = $this->jsonDecode($alert["polygon_coordinates"]);
-                    if (!empty($coordinates)) {
-                        $features[] = [
-                            "type" => "Feature",
-                            "properties" => array_merge($baseProperties, [
-                                "type" => "specific",
-                                "districts" => $alert["districts"] ?? []
-                            ]),
-                            "geometry" => [
-                                "type" => "Polygon",
-                                "coordinates" => [$coordinates]
-                            ]
-                        ];
-                    } else {
-                        $this->logError("Invalid polygon coordinates JSON for alert ID: " . $alert["id"]);
-                    }
-                } else {
-                    // Process county-wide alert
-                    $features[] = [
-                        "type" => "Feature",
-                        "properties" => array_merge($baseProperties, [
-                            "type" => "county-wide",
-                            "districts" => [
-                                'fire' => ['All Fire Districts'],
-                                'ems' => ['All EMS Districts'],
-                                'electric' => ['All Electric Providers']
-                            ]
-                        ])
-                    ];
-                }
-            } catch (Exception $e) {
-                $this->logError("Error processing alert to GeoJSON: " . $e->getMessage());
-                continue;
-            }
-        }
-
-        $result = [
-            "type" => "FeatureCollection",
-            "features" => $features,
-            "generated" => gmdate('Y-m-d\TH:i:s\Z')
-        ];
-
-        $this->logError("Generated GeoJSON with " . count($features) . " features");
-        return $result;
-    }
-	/**
-     * Gets active alerts for Putnam County
-     * @param string|null $category Optional category filter
-     * @return array Array of active alerts
-     */
-    public function getActiveAlerts(?string $category = null): array {
-        try {
-            $sql = "
-                SELECT 
-                    a.*,
-                    CASE 
-                        WHEN a.expires < UTC_TIMESTAMP() THEN 'Expired'
-                        WHEN a.ends IS NOT NULL AND a.ends < UTC_TIMESTAMP() THEN 'Ended'
-                        ELSE 'Active'
-                    END as current_status
-                FROM alerts a
-                WHERE a.status = 'Active'
-                AND (a.expires > UTC_TIMESTAMP() OR a.expires IS NULL)
-            ";
-
-            if ($category !== null && isset(self::ALERT_CATEGORIES[$category])) {
-                $sql .= " AND a.event_type IN (" . 
-                    implode(',', array_fill(0, count(self::ALERT_CATEGORIES[$category]), '?')) . 
-                    ")";
-                $params = self::ALERT_CATEGORIES[$category];
-            } else {
-                $params = [];
+                // Add the feature to our collection
+                $features[] = [
+                    'type' => 'Feature',
+                    'geometry' => $geometry,
+                    'properties' => $properties
+                ];
             }
 
-            $sql .= " ORDER BY a.effective DESC";
+            return [
+                'type' => 'FeatureCollection',
+                'features' => $features,
+                'timestamp' => date('Y-m-d H:i:s')
+            ];
 
-            $stmt = $this->db->prepare($sql);
-            $stmt->execute($params);
-
-            return $stmt->fetchAll();
-
-        } catch (PDOException $e) {
-            $this->logError("Database error fetching active alerts: " . $e->getMessage());
-            return [];
+        } catch (Exception $e) {
+            $this->logError("Error converting alerts to GeoJSON: " . $e->getMessage());
+            return [
+                'type' => 'FeatureCollection',
+                'features' => [],
+                'error' => $e->getMessage(),
+                'timestamp' => date('Y-m-d H:i:s')
+            ];
         }
     }
-
     /**
-     * Gets alert details by ID
-     * @param string $alertId The unique identifier of the alert
-     * @return array|null Alert details or null if not found
+     * Get system status information
+     * @return array System status details
      */
-    public function getAlertById(string $alertId): ?array {
+    public function getSystemStatus(): array {
         try {
-            $stmt = $this->db->prepare("
-                SELECT *,
-                CASE 
-                    WHEN expires < UTC_TIMESTAMP() THEN 'Expired'
-                    WHEN ends IS NOT NULL AND ends < UTC_TIMESTAMP() THEN 'Ended'
-                    ELSE status
-                END as current_status
-                FROM alerts 
-                WHERE alert_id = ?
-            ");
-            $stmt->execute([$alertId]);
-            $alert = $stmt->fetch();
-
-            if ($alert) {
-                // Convert JSON fields back to arrays
-                $alert['same_codes'] = $this->jsonDecode($alert['same_codes'] ?? '[]');
-                $alert['ugc_codes'] = $this->jsonDecode($alert['ugc_codes'] ?? '[]');
-                if ($alert['polygon_coordinates']) {
-                    $alert['polygon_coordinates'] = $this->jsonDecode($alert['polygon_coordinates']);
-                }
-                return $alert;
-            }
-
-            return null;
-
-        } catch (PDOException $e) {
-            $this->logError("Error fetching alert $alertId: " . $e->getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * Gets alerts by event type
-     * @param string $eventType The type of event to filter by
-     * @return array Array of matching alerts
-     */
-    public function getAlertsByEventType(string $eventType): array {
-        try {
-            $stmt = $this->db->prepare("
-                SELECT *,
-                CASE 
-                    WHEN expires < UTC_TIMESTAMP() THEN 'Expired'
-                    WHEN ends IS NOT NULL AND ends < UTC_TIMESTAMP() THEN 'Ended'
-                    ELSE status
-                END as current_status
-                FROM alerts 
-                WHERE event_type = ?
-                AND status = 'Active'
-                ORDER BY effective DESC
-            ");
-            $stmt->execute([$eventType]);
-            return $stmt->fetchAll();
-
-        } catch (PDOException $e) {
-            $this->logError("Error fetching alerts for event type $eventType: " . $e->getMessage());
-            return [];
-        }
-    }
-	/**
-     * Verifies and updates the database schema
-     * @throws Exception If schema verification fails
-     */
-    private function verifyTableSchema(): void {
-        try {
-            $this->logError("Verifying database schema...");
+            $currentTime = date('Y-m-d H:i:s');
             
-            // Check if table exists
-            $tableExists = $this->db->query("
-                SELECT COUNT(*)
-                FROM information_schema.tables 
-                WHERE table_schema = DATABASE()
-                AND table_name = 'alerts'
-            ")->fetchColumn();
-
-            if (!$tableExists) {
-                $this->logError("Alerts table not found. Creating table...");
-                $this->createAlertsTable();
-                return;
-            }
-
-            // Get existing columns
-            $stmt = $this->db->query("
-                SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT
-                FROM information_schema.columns
-                WHERE table_schema = DATABASE()
-                AND table_name = 'alerts'
-            ");
+            // Get district coverage
+            $districtData = $this->getDistrictCoverage();
             
-            $existingColumns = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            $existingColumnNames = array_column($existingColumns, 'COLUMN_NAME');
-
-            // Check for missing columns
-            foreach (self::REQUIRED_COLUMNS as $columnName => $definition) {
-                if (!in_array($columnName, $existingColumnNames)) {
-                    $this->logError("Adding missing column: $columnName");
-                    $this->db->exec("ALTER TABLE alerts ADD COLUMN $columnName $definition");
+            // First, get all the alert counts
+            $activeAlerts = $this->getActiveAlertCount();
+            $totalAlerts24h = $this->getTotalAlerts24h();
+            $extremeAlerts24h = $this->getExtremeAlerts24h();
+            $uniqueTypes24h = $this->getUniqueAlertTypes24h();
+            
+            // Build district data with all required fields
+            $districtTypes = ['fire', 'ems', 'electric'];
+            $districts = [];
+            
+            foreach ($districtTypes as $type) {
+                $districts[$type] = [
+                    'total' => 0,
+                    'affected' => 0,
+                    'percentage' => 0,
+                    'area' => $this->getDistrictArea($type),
+                    'districts' => [],
+                    'status' => 'normal', // Add status field
+                    'coverage' => 0       // Add coverage field
+                ];
+                
+                // If we have actual district data, merge it
+                if (isset($districtData['coverage'][$type])) {
+                    $districts[$type] = array_merge(
+                        $districts[$type],
+                        $districtData['coverage'][$type]
+                    );
                 }
             }
 
-            $this->logError("Schema verification completed successfully");
+            // Build the complete status array matching status.php expectations
+            $status = [
+                'system' => [
+                    'database' => $this->testConnection()['success'],
+                    'last_update' => $currentTime,
+                    'version' => '1.0.0',
+                    'debug_mode' => $this->debugMode
+                ],
+                'alerts' => [
+                    'active' => $activeAlerts,          // For line 188
+                    'total_alerts' => $totalAlerts24h,  // For line 194
+                    'extreme_alerts' => $extremeAlerts24h, // For line 202
+                    'unique_types' => $uniqueTypes24h,  // For line 210
+                    'total_all_time' => $this->getTotalAlertCount(),
+                    'current' => []  // Add empty array for current alerts
+                ],
+                'districts' => $districts,
+                'fire' => $districts['fire'],       // For line 281
+                'ems' => $districts['ems'],         // For line 291
+                'electric' => $districts['electric'] // For line 301
+            ];
 
-        } catch (PDOException $e) {
-            $this->logError("Schema verification failed: " . $e->getMessage());
-            throw new Exception("Failed to verify database schema: " . $e->getMessage());
+            return $status;
+
+        } catch (Exception $e) {
+            $this->logError("Error getting system status: " . $e->getMessage());
+            
+            // Return a complete structure even in case of error
+            $defaultDistrict = [
+                'total' => 0,
+                'affected' => 0,
+                'percentage' => 0,
+                'area' => 0,
+                'districts' => [],
+                'status' => 'normal',
+                'coverage' => 0
+            ];
+
+            return [
+                'system' => [
+                    'database' => false,
+                    'last_update' => date('Y-m-d H:i:s'),
+                    'version' => '1.0.0',
+                    'debug_mode' => false,
+                    'error' => $e->getMessage()
+                ],
+                'alerts' => [
+                    'active' => 0,
+                    'total_alerts' => 0,
+                    'extreme_alerts' => 0,
+                    'unique_types' => 0,
+                    'total_all_time' => 0,
+                    'current' => []
+                ],
+                'districts' => [
+                    'fire' => $defaultDistrict,
+                    'ems' => $defaultDistrict,
+                    'electric' => $defaultDistrict
+                ],
+                'fire' => $defaultDistrict,
+                'ems' => $defaultDistrict,
+                'electric' => $defaultDistrict
+            ];
         }
     }
 
     /**
-     * Creates the alerts table with all required columns
-     * @throws PDOException If table creation fails
+     * Get total area for a district type
+     * @param string $type District type
+     * @return float Total area in square miles
      */
-    private function createAlertsTable(): void {
-        $columns = array_map(
-            function ($name, $definition) {
-                return "$name $definition";
-            },
-            array_keys(self::REQUIRED_COLUMNS),
-            self::REQUIRED_COLUMNS
-        );
+    private function getDistrictArea(string $type): float {
+        try {
+            $stmt = $this->db->prepare("
+                SELECT SUM(ST_Area(geometry) * 0.000000386102) as total_area
+                FROM boundaries
+                WHERE type = ?
+            ");
+            $stmt->execute([$type]);
+            return round((float)$stmt->fetchColumn(), 2);
+        } catch (PDOException $e) {
+            $this->logError("Error calculating district area: " . $e->getMessage());
+            return 0.0;
+        }
+    }
+	
+public function getDistrictCoverage() {
+        try {
+            $coverage = [
+                'fire' => ['count' => 0, 'area' => 0],
+                'ems' => ['count' => 0, 'area' => 0],
+                'electric' => ['count' => 0, 'area' => 0]
+            ];
 
-        $sql = "CREATE TABLE alerts (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            " . implode(",\n            ", $columns) . ",
-            INDEX idx_alert_id (alert_id),
-            INDEX idx_event_type (event_type),
-            INDEX idx_status (status),
-            INDEX idx_expires (expires),
-            INDEX idx_effective (effective)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+            // Get counts and areas for each type
+            $query = "SELECT 
+                        type,
+                        COUNT(*) as count,
+                        COALESCE(SUM(ST_Area(geometry) * POW(69.172, 2)), 0) as area_sqmi
+                     FROM boundaries 
+                     GROUP BY type";
 
-        $this->db->exec($sql);
-        $this->logError("Created alerts table with schema version " . date('YmdHis'));
+            $stmt = $this->db->query($query);
+            $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            foreach ($results as $row) {
+                if (isset($coverage[$row['type']])) {
+                    $coverage[$row['type']]['count'] = (int)$row['count'];
+                    $coverage[$row['type']]['area'] = (float)$row['area_sqmi'];
+                }
+            }
+
+            $this->logError("District coverage data: " . json_encode($coverage));
+            return $coverage;
+
+        } catch (Exception $e) {
+            $this->logError("Error getting district coverage: " . $e->getMessage());
+            return [
+                'fire' => ['count' => 0, 'area' => 0],
+                'ems' => ['count' => 0, 'area' => 0],
+                'electric' => ['count' => 0, 'area' => 0]
+            ];
+        }
+    }
+
+
+    /**
+     * Log debug information
+     * @param string $message Debug message
+     */
+    private function logDebug(string $message): void {
+        if ($this->debugMode) {
+            error_log("[DEBUG] " . $message);
+        }
     }
 
     /**
-     * Cleans up expired alerts
-     * @param int $daysToKeep Number of days to keep expired alerts
-     * @return int Number of alerts cleaned up
+     * Convert various date formats to MySQL datetime
+     * @param string $date Date string to convert
+     * @return string MySQL formatted datetime
      */
-    public function cleanupExpiredAlerts(int $daysToKeep = 30): int {
+    private function convertToMySQLDateTime(string $date): string {
         try {
-            $stmt = $this->db->prepare("
-                UPDATE alerts 
-                SET status = 'Expired'
-                WHERE status = 'Active'
-                AND expires < UTC_TIMESTAMP()
-            ");
-            $stmt->execute();
-            $updatedCount = $stmt->rowCount();
+            $timestamp = strtotime($date);
+            if ($timestamp === false) {
+                throw new Exception("Invalid date format: $date");
+            }
+            return date('Y-m-d H:i:s', $timestamp);
+        } catch (Exception $e) {
+            $this->logError("Date conversion error: " . $e->getMessage());
+            return date('Y-m-d H:i:s'); // Return current date/time as fallback
+        }
+    }
 
-            // Delete old expired alerts
-            $stmt = $this->db->prepare("
-                DELETE FROM alerts
-                WHERE status = 'Expired'
-                AND expires < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY)
-            ");
-            $stmt->execute([$daysToKeep]);
-            $deletedCount = $stmt->rowCount();
-
-            $this->logError("Cleaned up alerts: $updatedCount updated, $deletedCount deleted");
-            return $updatedCount + $deletedCount;
-
+    /**
+     * Get total number of alerts in last 24 hours
+     * @return int Number of alerts
+     */
+    private function getTotalAlerts24h(): int {
+        try {
+            return (int)$this->db->query("
+                SELECT COUNT(*) 
+                FROM alerts 
+                WHERE created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)"
+            )->fetchColumn();
         } catch (PDOException $e) {
-            $this->logError("Error cleaning up expired alerts: " . $e->getMessage());
+            $this->logError("Error getting 24h alert count: " . $e->getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * Get number of extreme alerts in last 24 hours
+     * @return int Number of extreme alerts
+     */
+    private function getExtremeAlerts24h(): int {
+        try {
+            return (int)$this->db->query("
+                SELECT COUNT(*) 
+                FROM alerts 
+                WHERE severity = 'Extreme'
+                AND created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)"
+            )->fetchColumn();
+        } catch (PDOException $e) {
+            $this->logError("Error getting extreme alert count: " . $e->getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * Get number of unique alert types in last 24 hours
+     * @return int Number of unique alert types
+     */
+    private function getUniqueAlertTypes24h(): int {
+        try {
+            return (int)$this->db->query("
+                SELECT COUNT(DISTINCT event_type) 
+                FROM alerts 
+                WHERE created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)"
+            )->fetchColumn();
+        } catch (PDOException $e) {
+            $this->logError("Error getting unique alert types: " . $e->getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * Get active alert count
+     * @return int Number of active alerts
+     */
+    private function getActiveAlertCount(): int {
+        try {
+            return (int)$this->db->query("
+                SELECT COUNT(*) 
+                FROM alerts 
+                WHERE status = 'Active' 
+                AND effective <= UTC_TIMESTAMP() 
+                AND expires > UTC_TIMESTAMP()"
+            )->fetchColumn();
+        } catch (PDOException $e) {
+            $this->logError("Error getting active alert count: " . $e->getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * Get total alert count
+     * @return int Total number of alerts
+     */
+    private function getTotalAlertCount(): int {
+        try {
+            return (int)$this->db->query("SELECT COUNT(*) FROM alerts")->fetchColumn();
+        } catch (PDOException $e) {
+            $this->logError("Error getting total alert count: " . $e->getMessage());
             return 0;
         }
     }
 }
-
-/**
- * Last Modified: 2025-01-28 19:43:01 UTC
- * Modified By: KR8MER
- */
-?>
