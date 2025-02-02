@@ -19,9 +19,8 @@ class WeatherAlertSystem {
     private bool $debugMode = false;
     private int $logCounter = 0;
     private int $logLimit = 100;
-
-    private const PUTNAM_FIPS = '039137';
-    private const NWS_CAP_FEED = 'https://alerts.weather.gov/cap/oh.php?x=0';
+    private const COUNTY_CODE = 'IAZ001'; // New constant for the county code
+	private const NWS_CAP_FEED = 'https://api.weather.gov/alerts/active';
     private const USER_AGENT = 'PutnamCountyAlertSystem/1.0';
     private const CACHE_DURATION = 300;
 
@@ -684,72 +683,6 @@ class WeatherAlertSystem {
             ];
         }
     }
-
-    /**
-     * Fetch alerts from NWS CAP feed
-     * @return array Result of fetch operation
-     */
-    
-	private function fetchXMLWithCurl($url) {
-        $urlString = (string)$url;
-        $cacheKey = md5($urlString);
-
-        if (isset($this->cache[$cacheKey]) && (time() - $this->cache[$cacheKey]['time'] < self::CACHE_DURATION)) {
-            $this->logError("Using cached data for URL: " . $urlString);
-            return $this->cache[$cacheKey]['data'];
-        }
-
-        $ch = curl_init();
-        curl_setopt_array($ch, [
-            CURLOPT_URL => $urlString,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_USERAGENT => self::USER_AGENT,
-            CURLOPT_TIMEOUT => 30,
-            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-            CURLOPT_HTTPHEADER => [
-                'Accept: application/xml',
-                'Cache-Control: no-cache'
-            ],
-            CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_FOLLOWLOCATION => true
-        ]);
-
-        $this->logError("Fetching data from URL: " . $urlString);
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
-        if (curl_errno($ch)) {
-            $error = curl_error($ch);
-            curl_close($ch);
-            $this->logError("cURL Error fetching data: " . $error);
-            throw new Exception("cURL Error: $error");
-        }
-
-        curl_close($ch);
-
-        if ($httpCode !== 200) {
-            $this->logError("HTTP Error fetching data: " . $httpCode);
-            throw new Exception("HTTP Error: $httpCode");
-        }
-
-        if ($response === false) {
-            $this->logError("cURL returned false response");
-            throw new Exception("Failed to fetch data from URL: " . $urlString);
-        }
-
-        $xml = simplexml_load_string($response);
-        if (!$xml) {
-            $this->logError("Failed to parse XML response");
-            throw new Exception("Failed to parse XML response");
-        }
-
-        $this->cache[$cacheKey] = [
-            'time' => time(),
-            'data' => $xml
-        ];
-
-        return $xml;
-    }
 	
 	public function fetchAlerts(): int {
     try {
@@ -761,7 +694,7 @@ class WeatherAlertSystem {
         ]);
 
         // Fixed URL without the encoded quote
-        $url = 'https://api.weather.gov/alerts/active?zone=OHC137';
+        $url = 'https://api.weather.gov/alerts/active?zone=' . self::COUNTY_CODE;
         
         $this->logError("Fetching alerts from: " . $url);
         
@@ -1084,58 +1017,6 @@ private function processAlertDistricts(array $alert): void {
         }
     }
 }
-	
-private function isForPutnamCounty($cap) {
-        $this->logError("Checking if alert is for Putnam County...");
-        
-        if (!isset($cap->info->area->geocode)) {
-            $this->logError("No geocode found in alert");
-            return false;
-        }
-
-        foreach ($cap->info->area->geocode as $geocode) {
-            if ((string)$geocode->valueName === 'SAME' && 
-                (string)$geocode->value === self::PUTNAM_FIPS) {
-                $this->logError("Match found! Alert is for Putnam County");
-                return true;
-            }
-        }
-
-        $this->logError("No match found - alert is not for Putnam County");
-        return false;
-    }
-
-    private function processPolygon($cap) {
-        if (!isset($cap->info)) {
-            $this->logError("No info section found in CAP");
-            return ['type' => 'NONE', 'coordinates' => null];
-        }
-
-        $info = $cap->info;
-
-        if (isset($info->area->polygon)) {
-            $this->logError("Found polygon data");
-            return [
-                'type' => 'POLYGON',
-                'coordinates' => (string)$info->area->polygon
-            ];
-        }
-
-        if (isset($info->area->circle)) {
-            $this->logError("Found circle data");
-            return [
-                'type' => 'CIRCLE',
-                'coordinates' => (string)$info->area->circle
-            ];
-        }
-
-        $this->logError("No geometry data found");
-        return [
-            'type' => 'NONE',
-            'coordinates' => null
-        ];
-    }
-
 
 
     /**
