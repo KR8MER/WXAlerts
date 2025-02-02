@@ -760,34 +760,29 @@ class WeatherAlertSystem {
             ]
         ]);
 
+        // Fixed URL without the encoded quote
+        $url = 'https://api.weather.gov/alerts/active?zone=OHC137';
+        
+        $this->logError("Fetching alerts from: " . $url);
+        
         // Fetch GeoJSON from NWS API
-        $json = file_get_contents('https://api.weather.gov/alerts/active?zone=OHC137', false, $context);
+        $json = file_get_contents($url, false, $context);
         if ($json === false) {
             throw new Exception('Failed to fetch alerts from NWS API');
         }
 
         $data = json_decode($json, true);
         if (!isset($data['features'])) {
-            throw new Exception('Invalid GeoJSON format');
+            $this->logError("No features found in API response");
+            return 0;
         }
 
         $newAlertCount = 0;
         foreach ($data['features'] as $feature) {
-            $alert = $this->processGeoJSONAlert($feature);
-            
-            // Check if alert already exists
-            $stmt = $this->db->prepare("SELECT id FROM alerts WHERE cap_id = ?");
-            $stmt->execute([$alert['id']]);
-            
-            if (!$stmt->fetch()) {
-                // Insert new alert
-                $this->insertAlert($alert);
+            // Process and save each alert
+            $alert = $this->processCapAlert($feature);
+            if ($this->saveAlert($alert)) {
                 $newAlertCount++;
-
-                // Process districts if geometry exists
-                if ($alert['geometry'] !== null) {
-                    $this->processAlertDistricts($alert);
-                }
             }
         }
 
@@ -796,6 +791,105 @@ class WeatherAlertSystem {
     } catch (Exception $e) {
         $this->logError("Error fetching alerts: " . $e->getMessage());
         return 0;
+    }
+}
+
+private function processCapAlert(array $feature): array {
+    $props = $feature['properties'] ?? [];
+    
+    // Create an empty polygon WKT string for the default case
+    $defaultPolygon = 'POLYGON((0 0,0 0,0 0,0 0))';
+    
+    $alert = [
+        'alert_id' => $props['id'] ?? uniqid('ALERT_', true),
+        'title' => $props['headline'] ?? 'No Title',
+        'event_type' => $props['event'] ?? 'Unknown',
+        'event' => $props['event'] ?? 'Unknown',
+        'severity' => $props['severity'] ?? 'Unknown',
+        'urgency' => $props['urgency'] ?? 'Unknown',
+        'certainty' => $props['certainty'] ?? 'Unknown',
+        'description' => $props['description'] ?? '',
+        'effective' => $this->convertToMySQLDateTime($props['effective'] ?? '2025-02-02 13:48:56'),
+        'expires' => $this->convertToMySQLDateTime($props['expires'] ?? '2025-02-02 14:48:56'),
+        'ends' => $this->convertToMySQLDateTime($props['expires'] ?? '2025-02-02 14:48:56'),
+        'polygon_type' => 'NONE',
+        'polygon' => $defaultPolygon, // Set default polygon
+        'status' => $props['status'] ?? 'Active',
+        'is_county_wide' => 0,
+        'affected_county' => 'Putnam',
+        'message_type' => $props['messageType'] ?? 'Alert',
+        'category' => $props['category'] ?? 'Other',
+        'response' => $props['response'] ?? '',
+        'polygon_coordinates' => json_encode([[0,0],[0,0],[0,0],[0,0]]),
+        'polygon_valid' => 0,
+        'same_codes' => json_encode($props['parameters']['SAME'] ?? []),
+        'ugc_codes' => json_encode($props['parameters']['UGC'] ?? [])
+    ];
+
+    // Handle geometry if it exists
+    if (isset($feature['geometry']) && !empty($feature['geometry'])) {
+        $alert['polygon_type'] = 'POLYGON';
+        $wkt = $this->convertToWKT($feature['geometry']);
+        if ($wkt) {
+            $alert['polygon'] = $wkt;
+            $alert['polygon_coordinates'] = json_encode($feature['geometry']['coordinates'] ?? []);
+            $alert['polygon_valid'] = 1;
+        }
+    }
+
+    return $alert;
+}
+
+private function saveAlert(array $alert): bool {
+    try {
+        // Ensure polygon is never null
+        if (empty($alert['polygon'])) {
+            $alert['polygon'] = 'POLYGON((0 0,0 0,0 0,0 0))';
+        }
+
+        $sql = "INSERT INTO alerts (
+            alert_id, title, event_type, event, severity, urgency, certainty,
+            description, effective, expires, ends, polygon_type, polygon,
+            status, is_county_wide, affected_county, message_type, category,
+            response, polygon_coordinates, polygon_valid, same_codes, ugc_codes
+        ) VALUES (
+            :alert_id, :title, :event_type, :event, :severity, :urgency, :certainty,
+            :description, :effective, :expires, :ends, :polygon_type, ST_GeomFromText(:polygon),
+            :status, :is_county_wide, :affected_county, :message_type, :category,
+            :response, :polygon_coordinates, :polygon_valid, :same_codes, :ugc_codes
+        ) ON DUPLICATE KEY UPDATE
+            title = VALUES(title),
+            event_type = VALUES(event_type),
+            event = VALUES(event),
+            severity = VALUES(severity),
+            urgency = VALUES(urgency),
+            certainty = VALUES(certainty),
+            description = VALUES(description),
+            effective = VALUES(effective),
+            expires = VALUES(expires),
+            ends = VALUES(ends),
+            polygon_type = VALUES(polygon_type),
+            polygon = VALUES(polygon),
+            status = VALUES(status),
+            is_county_wide = VALUES(is_county_wide),
+            affected_county = VALUES(affected_county),
+            message_type = VALUES(message_type),
+            category = VALUES(category),
+            response = VALUES(response),
+            polygon_coordinates = VALUES(polygon_coordinates),
+            polygon_valid = VALUES(polygon_valid),
+            same_codes = VALUES(same_codes),
+            ugc_codes = VALUES(ugc_codes)";
+
+        $stmt = $this->db->prepare($sql);
+        return $stmt->execute($alert);
+
+    } catch (PDOException $e) {
+        $this->logError("Error saving alert: " . $e->getMessage());
+        if ($this->debugMode) {
+            $this->logError("Alert data: " . json_encode($alert));
+        }
+        return false;
     }
 }
 
@@ -922,11 +1016,34 @@ private function insertAlert(array $alert): bool {
     }
 }
 
-/**
- * Extract county name from UGC code
- * @param string $ugc UGC code (e.g., "WVC001")
- * @return string|null County name
- */
+    /**
+     * Process geometry data for database storage
+     * @param array|null $geometry GeoJSON geometry object
+     * @return string|null WKT formatted geometry
+     */
+    private function processGeometry(?array $geometry): ?string {
+        if (!$geometry || empty($geometry)) {
+            if ($this->debugMode) {
+                $this->logError("Empty or null geometry received");
+            }
+            return null;
+        }
+
+        try {
+            $wkt = $this->convertGeoJSONToWKT($geometry);
+            if ($this->debugMode) {
+                $this->logError("Geometry converted to WKT successfully");
+            }
+            return $wkt;
+        } catch (Exception $e) {
+            $this->logError("Geometry processing error: " . $e->getMessage());
+            if ($this->debugMode) {
+                $this->logError("Raw geometry data: " . json_encode($geometry));
+            }
+            return null;
+        }
+    }
+
 private function getCountyFromUGC(string $ugc): ?string {
     // You'll need to implement a lookup table or API call to convert UGC to county name
     // For now, we'll return the code
