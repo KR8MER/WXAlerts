@@ -19,7 +19,7 @@ class WeatherAlertSystem {
     private bool $debugMode = false;
     private int $logCounter = 0;
     private int $logLimit = 100;
-    private const COUNTY_CODE = 'IAZ001'; // New constant for the county code
+    private const COUNTY_CODE = 'OHZ016';
 	private const NWS_CAP_FEED = 'https://api.weather.gov/alerts/active';
     private const USER_AGENT = 'PutnamCountyAlertSystem/1.0';
     private const CACHE_DURATION = 300;
@@ -141,6 +141,63 @@ class WeatherAlertSystem {
         }
     }
 
+/**
+ * Test the connection to weather alert feed
+ * @return array Connection test results
+ */
+public function testConnection(): array {
+    try {
+        // First test database connection
+        $this->db->query('SELECT 1');
+
+        // Now test alert feed connection
+        $context = stream_context_create([
+            'http' => [
+                'user_agent' => self::USER_AGENT,
+                'timeout' => 30
+            ]
+        ]);
+
+        $feed = file_get_contents(self::NWS_CAP_FEED, false, $context);
+        if ($feed === false) {
+            return [
+                'success' => false,
+                'message' => 'Failed to connect to NWS CAP feed',
+                'entry_count' => 0
+            ];
+        }
+
+        // Log the feed response for debugging
+        error_log("Feed response: " . substr($feed, 0, 500)); // Log first 500 characters
+
+        $data = json_decode($feed, true);
+        if ($data === null) {
+            return [
+                'success' => false,
+                'message' => 'Failed to parse NWS CAP feed',
+                'entry_count' => 0
+            ];
+        }
+
+        // Count entries in the feed
+        $entries = $data['features'] ?? [];
+        $entry_count = count($entries);
+
+        return [
+            'success' => true,
+            'message' => 'Connection successful',
+            'entry_count' => $entry_count
+        ];
+
+    } catch (Exception $e) {
+        return [
+            'success' => false,
+            'message' => $e->getMessage(),
+            'entry_count' => 0
+        ];
+    }
+}
+
     /**
      * Verify and update specific table schema
      * @param string $tableName Name of table to verify
@@ -222,64 +279,7 @@ class WeatherAlertSystem {
         $this->logError("Created $tableName table with schema version " . date('YmdHis'));
     }
 
-    /**
-     * Test database connection
-     * @return array Connection status and message
-     */
-    /**
-     * Test the connection to weather alert feed
-     * @return array Connection test results
-     */
-    public function testConnection(): array {
-        try {
-            // First test database connection
-            $this->db->query('SELECT 1');
-
-            // Now test alert feed connection
-            $context = stream_context_create([
-                'http' => [
-                    'user_agent' => self::USER_AGENT,
-                    'timeout' => 30
-                ]
-            ]);
-
-            $feed = file_get_contents(self::NWS_CAP_FEED, false, $context);
-            if ($feed === false) {
-                return [
-                    'success' => false,
-                    'message' => 'Failed to connect to NWS CAP feed',
-                    'entry_count' => 0
-                ];
-            }
-
-            $xml = simplexml_load_string($feed);
-            if ($xml === false) {
-                return [
-                    'success' => false,
-                    'message' => 'Failed to parse NWS CAP feed',
-                    'entry_count' => 0
-                ];
-            }
-
-            // Count entries in the feed
-            $entries = $xml->xpath('//entry');
-            $entry_count = count($entries);
-
-            return [
-                'success' => true,
-                'message' => 'Connection successful',
-                'entry_count' => $entry_count
-            ];
-
-        } catch (Exception $e) {
-            return [
-                'success' => false,
-                'message' => $e->getMessage(),
-                'entry_count' => 0
-            ];
-        }
-    }
-	/**
+   /**
      * Get a specific alert by ID
      * @param string|int $id Alert ID or database ID
      * @return array|null Alert data or null if not found
